@@ -8,11 +8,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Switch } from '../components/ui/switch';
 import { Checkbox } from '../components/ui/checkbox';
 import { Separator } from '../components/ui/separator';
-import { Settings as SettingsIcon, Calendar, Bell, Database, Loader2 } from 'lucide-react';
+import { Settings as SettingsIcon, Calendar, Bell, Database, Loader2, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { useSettings } from '../hooks/useSettings';
 import { useAuthContext } from '../components/AuthProvider';
-import { WorkingWindow } from '../lib/api';
+import { WorkingWindow, CalendarInfo, calendar as calendarApi } from '../lib/api';
 
 const DAYS_OF_WEEK = [
   { key: 'monday', label: 'Monday' },
@@ -33,6 +33,27 @@ export function Settings() {
   const [timezone, setTimezone] = useState('America/New_York');
   const [minGap, setMinGap] = useState('5');
   const [saving, setSaving] = useState(false);
+  
+  // Calendar selection state
+  const [availableCalendars, setAvailableCalendars] = useState<CalendarInfo[]>([]);
+  const [selectedCalendars, setSelectedCalendars] = useState<string[] | null>(null);
+  const [calendarsLoading, setCalendarsLoading] = useState(false);
+
+  // Fetch available calendars when authenticated
+  useEffect(() => {
+    if (isAuthenticated) {
+      fetchCalendars();
+    }
+  }, [isAuthenticated]);
+
+  const fetchCalendars = async () => {
+    setCalendarsLoading(true);
+    const result = await calendarApi.listCalendars();
+    if (result.data?.calendars) {
+      setAvailableCalendars(result.data.calendars);
+    }
+    setCalendarsLoading(false);
+  };
 
   // Sync state when settings load
   useEffect(() => {
@@ -41,6 +62,7 @@ export function Settings() {
       setBlockLength(String(settings.blockLengthMinutes));
       setTimezone(settings.timezone);
       setMinGap(String(settings.minGapMinutes));
+      setSelectedCalendars(settings.selectedCalendars);
     }
   }, [settings]);
 
@@ -56,6 +78,7 @@ export function Settings() {
       blockLengthMinutes: parseInt(blockLength),
       timezone,
       minGapMinutes: parseInt(minGap),
+      selectedCalendars,
     });
     setSaving(false);
     
@@ -64,6 +87,41 @@ export function Settings() {
     } else {
       toast.error('Failed to save settings');
     }
+  };
+
+  const handleCalendarToggle = (calendarId: string) => {
+    setSelectedCalendars(prev => {
+      // If null (all selected), switch to all except this one
+      if (prev === null) {
+        return availableCalendars
+          .map(c => c.id)
+          .filter(id => id !== calendarId);
+      }
+      
+      // If already selected, remove it
+      if (prev.includes(calendarId)) {
+        const newSelection = prev.filter(id => id !== calendarId);
+        // If nothing selected, keep at least one
+        return newSelection.length > 0 ? newSelection : prev;
+      }
+      
+      // Add to selection
+      const newSelection = [...prev, calendarId];
+      // If all are selected, set to null
+      if (newSelection.length === availableCalendars.length) {
+        return null;
+      }
+      return newSelection;
+    });
+  };
+
+  const handleSelectAllCalendars = () => {
+    setSelectedCalendars(null); // null means all calendars
+  };
+
+  const isCalendarSelected = (calendarId: string): boolean => {
+    if (selectedCalendars === null) return true; // All selected
+    return selectedCalendars.includes(calendarId);
   };
 
   const handleDayToggle = (dayKey: string) => {
@@ -156,6 +214,74 @@ export function Settings() {
                       <SelectItem value="Asia/Tokyo">Tokyo (JST)</SelectItem>
                     </SelectContent>
                   </Select>
+                </div>
+
+                <Separator />
+
+                {/* Calendar Selection */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <Label>Calendars to Display</Label>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={handleSelectAllCalendars}
+                        disabled={selectedCalendars === null}
+                      >
+                        Select All
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={fetchCalendars}
+                        disabled={calendarsLoading || !isAuthenticated}
+                      >
+                        <RefreshCw className={`h-4 w-4 ${calendarsLoading ? 'animate-spin' : ''}`} />
+                      </Button>
+                    </div>
+                  </div>
+                  
+                  {!isAuthenticated ? (
+                    <p className="text-sm text-muted-foreground">
+                      Sign in to see your calendars
+                    </p>
+                  ) : calendarsLoading ? (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Loading calendars...
+                    </div>
+                  ) : availableCalendars.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      No calendars found. Click refresh to try again.
+                    </p>
+                  ) : (
+                    <div className="space-y-2">
+                      {availableCalendars.map((cal) => (
+                        <div
+                          key={cal.id}
+                          className="flex items-center gap-3 rounded-lg border border-border p-3"
+                        >
+                          <Checkbox
+                            id={`cal-${cal.id}`}
+                            checked={isCalendarSelected(cal.id)}
+                            onCheckedChange={() => handleCalendarToggle(cal.id)}
+                          />
+                          <label
+                            htmlFor={`cal-${cal.id}`}
+                            className="flex-1 cursor-pointer select-none text-sm font-medium"
+                          >
+                            {cal.name}
+                          </label>
+                        </div>
+                      ))}
+                      <p className="text-xs text-muted-foreground mt-2">
+                        {selectedCalendars === null 
+                          ? `All ${availableCalendars.length} calendars selected`
+                          : `${selectedCalendars.length} of ${availableCalendars.length} calendars selected`}
+                      </p>
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>

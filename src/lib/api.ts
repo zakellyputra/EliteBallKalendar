@@ -40,6 +40,7 @@ export const auth = {
 
 // Calendar
 export const calendar = {
+  listCalendars: () => request<{ calendars: CalendarInfo[] }>('/calendar/list'),
   getEvents: (timeMin?: string, timeMax?: string) => {
     const params = new URLSearchParams();
     if (timeMin) params.set('timeMin', timeMin);
@@ -162,6 +163,13 @@ export interface CalendarEvent {
   isEliteBall?: boolean;
   goalId?: string;
   blockId?: string;
+  calendarId?: string;
+  calendarName?: string;
+}
+
+export interface CalendarInfo {
+  id: string;
+  name: string;
 }
 
 export interface CreateEventInput {
@@ -191,6 +199,7 @@ export interface Settings {
   blockLengthMinutes: number;
   timezone: string;
   minGapMinutes: number;
+  selectedCalendars: string[] | null; // null means all calendars
 }
 
 export interface WorkingWindow {
@@ -206,6 +215,7 @@ export interface UpdateSettingsInput {
   blockLengthMinutes?: number;
   timezone?: string;
   minGapMinutes?: number;
+  selectedCalendars?: string[] | null;
 }
 
 export interface ProposedBlock {

@@ -1,8 +1,20 @@
 import { Router, Response } from 'express';
 import { requireAuth, AuthenticatedRequest } from '../middleware/auth';
-import { listEvents, createEvent, updateEvent, deleteEvent, getWeekRange } from '../lib/google-calendar';
+import { listEvents, createEvent, updateEvent, deleteEvent, getWeekRange, getAvailableCalendars } from '../lib/google-calendar';
+import { prisma } from '../index';
 
 const router = Router();
+
+// Get list of available calendars
+router.get('/list', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const calendars = await getAvailableCalendars(req.userId!);
+    res.json({ calendars });
+  } catch (err: any) {
+    console.error('Error fetching calendar list:', err);
+    res.status(500).json({ error: err.message || 'Failed to fetch calendars' });
+  }
+});
 
 // Get calendar events for the current week
 router.get('/events', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
@@ -17,7 +29,16 @@ router.get('/events', requireAuth, async (req: AuthenticatedRequest, res: Respon
       ? new Date(req.query.timeMax as string) 
       : end;
 
-    const events = await listEvents(req.userId!, timeMin, timeMax);
+    // Get user's selected calendars from settings
+    const settings = await prisma.settings.findUnique({
+      where: { userId: req.userId! },
+    });
+    
+    const selectedCalendars = settings?.selectedCalendars 
+      ? JSON.parse(settings.selectedCalendars) 
+      : null;
+
+    const events = await listEvents(req.userId!, timeMin, timeMax, selectedCalendars);
     res.json({ events });
   } catch (err: any) {
     console.error('Error fetching calendar events:', err);

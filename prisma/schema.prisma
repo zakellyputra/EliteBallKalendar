@@ -34,6 +34,7 @@ model Settings {
   blockLengthMinutes Int    @default(30)
   timezone           String @default("America/New_York")
   minGapMinutes      Int    @default(5)
+  selectedCalendars  String? // JSON array of calendar IDs, null means all calendars
 }
 
 model Goal {

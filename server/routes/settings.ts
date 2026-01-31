@@ -31,14 +31,18 @@ router.get('/', requireAuth, async (req: AuthenticatedRequest, res: Response) =>
           blockLengthMinutes: 30,
           timezone: 'America/New_York',
           minGapMinutes: 5,
+          selectedCalendars: null, // null means all calendars
         },
       });
     }
 
-    // Parse workingWindow from JSON
+    // Parse JSON fields
     const parsed = {
       ...settings,
       workingWindow: JSON.parse(settings.workingWindow),
+      selectedCalendars: settings.selectedCalendars 
+        ? JSON.parse(settings.selectedCalendars) 
+        : null,
     };
 
     res.json({ settings: parsed });
@@ -51,7 +55,7 @@ router.get('/', requireAuth, async (req: AuthenticatedRequest, res: Response) =>
 // Update user settings
 router.put('/', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { workingWindow, blockLengthMinutes, timezone, minGapMinutes } = req.body;
+    const { workingWindow, blockLengthMinutes, timezone, minGapMinutes, selectedCalendars } = req.body;
 
     const updateData: any = {};
     
@@ -67,6 +71,12 @@ router.put('/', requireAuth, async (req: AuthenticatedRequest, res: Response) =>
     if (minGapMinutes !== undefined) {
       updateData.minGapMinutes = minGapMinutes;
     }
+    if (selectedCalendars !== undefined) {
+      // null means all calendars, array means specific selection
+      updateData.selectedCalendars = selectedCalendars === null 
+        ? null 
+        : JSON.stringify(selectedCalendars);
+    }
 
     // Upsert settings
     const settings = await prisma.settings.upsert({
@@ -78,12 +88,16 @@ router.put('/', requireAuth, async (req: AuthenticatedRequest, res: Response) =>
         blockLengthMinutes: updateData.blockLengthMinutes || 30,
         timezone: updateData.timezone || 'America/New_York',
         minGapMinutes: updateData.minGapMinutes || 5,
+        selectedCalendars: updateData.selectedCalendars || null,
       },
     });
 
     const parsed = {
       ...settings,
       workingWindow: JSON.parse(settings.workingWindow),
+      selectedCalendars: settings.selectedCalendars 
+        ? JSON.parse(settings.selectedCalendars) 
+        : null,
     };
 
     res.json({ settings: parsed });

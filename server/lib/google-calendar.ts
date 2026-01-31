@@ -11,6 +11,8 @@ export interface CalendarEvent {
   isEliteBall?: boolean;
   goalId?: string;
   blockId?: string;
+  calendarId?: string;
+  calendarName?: string;
 }
 
 export interface CreateEventInput {
@@ -56,41 +58,93 @@ async function getCalendarClient(userId: string): Promise<calendar_v3.Calendar> 
   return google.calendar({ version: 'v3', auth: oauth2Client });
 }
 
+export interface CalendarInfo {
+  id: string;
+  name: string;
+}
+
+async function listCalendarsInternal(calendar: calendar_v3.Calendar): Promise<CalendarInfo[]> {
+  const response = await calendar.calendarList.list();
+  const calendars = response.data.items || [];
+  return calendars
+    .filter(cal => cal.accessRole === 'owner' || cal.accessRole === 'writer' || cal.accessRole === 'reader')
+    .map(cal => ({
+      id: cal.id!,
+      name: cal.summary || cal.id!,
+    }))
+    .filter(cal => cal.id);
+}
+
+// Public function to get available calendars for a user
+export async function getAvailableCalendars(userId: string): Promise<CalendarInfo[]> {
+  const calendar = await getCalendarClient(userId);
+  return listCalendarsInternal(calendar);
+}
+
 export async function listEvents(
   userId: string,
   timeMin: Date,
-  timeMax: Date
+  timeMax: Date,
+  selectedCalendarIds?: string[] | null
 ): Promise<CalendarEvent[]> {
   const calendar = await getCalendarClient(userId);
 
-  const response = await calendar.events.list({
-    calendarId: 'primary',
-    timeMin: timeMin.toISOString(),
-    timeMax: timeMax.toISOString(),
-    singleEvents: true,
-    orderBy: 'startTime',
-  });
-
-  const events = response.data.items || [];
+  // Get all calendars the user has access to
+  let calendars = await listCalendarsInternal(calendar);
   
-  return events.map((event) => {
-    // Parse eliteball metadata from description
-    const description = event.description || '';
-    const isEliteBall = description.includes('eliteball=true');
-    const goalIdMatch = description.match(/goalId=([^\n]+)/);
-    const blockIdMatch = description.match(/blockId=([^\n]+)/);
+  // Filter to only selected calendars if specified
+  if (selectedCalendarIds && selectedCalendarIds.length > 0) {
+    calendars = calendars.filter(cal => selectedCalendarIds.includes(cal.id));
+  }
 
-    return {
-      id: event.id!,
-      title: event.summary || 'Untitled',
-      description: event.description || undefined,
-      start: event.start?.dateTime || event.start?.date!,
-      end: event.end?.dateTime || event.end?.date!,
-      isEliteBall,
-      goalId: goalIdMatch?.[1],
-      blockId: blockIdMatch?.[1],
-    };
+  // Fetch events from all calendars in parallel
+  const eventsPromises = calendars.map(async (calInfo) => {
+    try {
+      const response = await calendar.events.list({
+        calendarId: calInfo.id,
+        timeMin: timeMin.toISOString(),
+        timeMax: timeMax.toISOString(),
+        singleEvents: true,
+        orderBy: 'startTime',
+      });
+
+      const events = response.data.items || [];
+      
+      return events.map((event) => {
+        // Parse eliteball metadata from description
+        const description = event.description || '';
+        const isEliteBall = description.includes('eliteball=true');
+        const goalIdMatch = description.match(/goalId=([^\n]+)/);
+        const blockIdMatch = description.match(/blockId=([^\n]+)/);
+
+        return {
+          id: event.id!,
+          title: event.summary || 'Untitled',
+          description: event.description || undefined,
+          start: event.start?.dateTime || event.start?.date!,
+          end: event.end?.dateTime || event.end?.date!,
+          isEliteBall,
+          goalId: goalIdMatch?.[1],
+          blockId: blockIdMatch?.[1],
+          calendarId: calInfo.id,
+          calendarName: calInfo.name,
+        };
+      });
+    } catch (error) {
+      // Skip calendars that fail (e.g., no access)
+      console.error(`Failed to fetch events from calendar ${calInfo.id}:`, error);
+      return [];
+    }
   });
+
+  const allEventsArrays = await Promise.all(eventsPromises);
+  
+  // Flatten all events and sort by start time
+  const allEvents = allEventsArrays.flat().sort((a, b) => 
+    new Date(a.start).getTime() - new Date(b.start).getTime()
+  );
+
+  return allEvents;
 }
 
 export async function createEvent(
