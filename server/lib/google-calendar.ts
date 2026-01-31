@@ -1,0 +1,190 @@
+import { google, calendar_v3 } from 'googleapis';
+import { getOAuth2Client, refreshAccessToken } from './auth';
+import { prisma } from '../index';
+
+export interface CalendarEvent {
+  id: string;
+  title: string;
+  description?: string;
+  start: string; // ISO string
+  end: string; // ISO string
+  isEliteBall?: boolean;
+  goalId?: string;
+  blockId?: string;
+}
+
+export interface CreateEventInput {
+  title: string;
+  description?: string;
+  start: string; // ISO string
+  end: string; // ISO string
+}
+
+async function getCalendarClient(userId: string): Promise<calendar_v3.Calendar> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+  });
+
+  if (!user || !user.accessToken) {
+    throw new Error('User not authenticated');
+  }
+
+  const oauth2Client = getOAuth2Client();
+  
+  // Check if token is expired
+  if (user.tokenExpiry && new Date() >= user.tokenExpiry) {
+    if (!user.refreshToken) {
+      throw new Error('Refresh token not available');
+    }
+    
+    const { accessToken, expiry } = await refreshAccessToken(user.refreshToken);
+    
+    // Update user with new access token
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        accessToken,
+        tokenExpiry: expiry,
+      },
+    });
+    
+    oauth2Client.setCredentials({ access_token: accessToken });
+  } else {
+    oauth2Client.setCredentials({ access_token: user.accessToken });
+  }
+
+  return google.calendar({ version: 'v3', auth: oauth2Client });
+}
+
+export async function listEvents(
+  userId: string,
+  timeMin: Date,
+  timeMax: Date
+): Promise<CalendarEvent[]> {
+  const calendar = await getCalendarClient(userId);
+
+  const response = await calendar.events.list({
+    calendarId: 'primary',
+    timeMin: timeMin.toISOString(),
+    timeMax: timeMax.toISOString(),
+    singleEvents: true,
+    orderBy: 'startTime',
+  });
+
+  const events = response.data.items || [];
+  
+  return events.map((event) => {
+    // Parse eliteball metadata from description
+    const description = event.description || '';
+    const isEliteBall = description.includes('eliteball=true');
+    const goalIdMatch = description.match(/goalId=([^\n]+)/);
+    const blockIdMatch = description.match(/blockId=([^\n]+)/);
+
+    return {
+      id: event.id!,
+      title: event.summary || 'Untitled',
+      description: event.description || undefined,
+      start: event.start?.dateTime || event.start?.date!,
+      end: event.end?.dateTime || event.end?.date!,
+      isEliteBall,
+      goalId: goalIdMatch?.[1],
+      blockId: blockIdMatch?.[1],
+    };
+  });
+}
+
+export async function createEvent(
+  userId: string,
+  input: CreateEventInput
+): Promise<CalendarEvent> {
+  const calendar = await getCalendarClient(userId);
+
+  const response = await calendar.events.insert({
+    calendarId: 'primary',
+    requestBody: {
+      summary: input.title,
+      description: input.description,
+      start: {
+        dateTime: input.start,
+        timeZone: 'America/New_York', // TODO: use user's timezone
+      },
+      end: {
+        dateTime: input.end,
+        timeZone: 'America/New_York',
+      },
+    },
+  });
+
+  const event = response.data;
+  
+  return {
+    id: event.id!,
+    title: event.summary || 'Untitled',
+    description: event.description || undefined,
+    start: event.start?.dateTime || event.start?.date!,
+    end: event.end?.dateTime || event.end?.date!,
+  };
+}
+
+export async function updateEvent(
+  userId: string,
+  eventId: string,
+  input: Partial<CreateEventInput>
+): Promise<CalendarEvent> {
+  const calendar = await getCalendarClient(userId);
+
+  const updateBody: calendar_v3.Schema$Event = {};
+  if (input.title) updateBody.summary = input.title;
+  if (input.description !== undefined) updateBody.description = input.description;
+  if (input.start) {
+    updateBody.start = {
+      dateTime: input.start,
+      timeZone: 'America/New_York',
+    };
+  }
+  if (input.end) {
+    updateBody.end = {
+      dateTime: input.end,
+      timeZone: 'America/New_York',
+    };
+  }
+
+  const response = await calendar.events.patch({
+    calendarId: 'primary',
+    eventId,
+    requestBody: updateBody,
+  });
+
+  const event = response.data;
+  
+  return {
+    id: event.id!,
+    title: event.summary || 'Untitled',
+    description: event.description || undefined,
+    start: event.start?.dateTime || event.start?.date!,
+    end: event.end?.dateTime || event.end?.date!,
+  };
+}
+
+export async function deleteEvent(userId: string, eventId: string): Promise<void> {
+  const calendar = await getCalendarClient(userId);
+
+  await calendar.events.delete({
+    calendarId: 'primary',
+    eventId,
+  });
+}
+
+export function getWeekRange(date: Date = new Date()): { start: Date; end: Date } {
+  const start = new Date(date);
+  const day = start.getDay();
+  const diff = start.getDate() - day + (day === 0 ? -6 : 1); // Monday
+  start.setDate(diff);
+  start.setHours(0, 0, 0, 0);
+
+  const end = new Date(start);
+  end.setDate(start.getDate() + 7);
+  end.setHours(23, 59, 59, 999);
+
+  return { start, end };
+}
