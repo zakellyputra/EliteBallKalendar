@@ -1,7 +1,28 @@
 // Gemini API client for AI rescheduling
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent';
+const PREFERRED_MODELS = [
+  'gemini-1.5-flash-latest',
+  'gemini-1.5-flash',
+  'gemini-1.5-pro-latest',
+  'gemini-1.5-pro',
+  'gemini-1.0-pro',
+];
+const FALLBACK_MODELS = ['gemini-1.5-flash-latest', 'gemini-1.5-flash'];
+const DEFAULT_API_BASES = [
+  'https://generativelanguage.googleapis.com/v1beta/models',
+  'https://generativelanguage.googleapis.com/v1/models',
+];
+const GEMINI_MODELS = (process.env.GEMINI_MODEL || '')
+  .split(',')
+  .map((model) => model.trim())
+  .filter(Boolean);
+const ACTIVE_API_BASES = (process.env.GEMINI_API_BASES || '')
+  .split(',')
+  .map((base) => base.trim())
+  .filter(Boolean);
+const GEMINI_API_BASES = ACTIVE_API_BASES.length > 0 ? ACTIVE_API_BASES : DEFAULT_API_BASES;
+let cachedResolvedModels: string[] | null = null;
 
 export interface RescheduleOperation {
   op: 'move' | 'create' | 'delete';
@@ -64,37 +85,23 @@ export async function generateReschedule(
   }
 
   try {
-    const response = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              { text: SYSTEM_PROMPT },
-              { text: `Context:\n${context}` },
-              { text: `User request: ${userMessage}` },
-            ],
-          },
-        ],
-        generationConfig: {
-          temperature: 0.2,
-          topK: 40,
-          topP: 0.95,
-          maxOutputTokens: 2048,
+    const data = await callGemini({
+      contents: [
+        {
+          parts: [
+            { text: SYSTEM_PROMPT },
+            { text: `Context:\n${context}` },
+            { text: `User request: ${userMessage}` },
+          ],
         },
-      }),
+      ],
+      generationConfig: {
+        temperature: 0.2,
+        topK: 40,
+        topP: 0.95,
+        maxOutputTokens: 2048,
+      },
     });
-
-    if (!response.ok) {
-      const error = await response.text();
-      console.error('[Gemini] API error:', error);
-      throw new Error(`Gemini API error: ${response.status}`);
-    }
-
-    const data = await response.json();
     
     // Extract text from response
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
@@ -156,25 +163,13 @@ Remember the required schema:
 }`;
 
   try {
-    const response = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
+    const data = await callGemini({
+      contents: [{ parts: [{ text: fixPrompt }] }],
+      generationConfig: {
+        temperature: 0.1,
+        maxOutputTokens: 2048,
       },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: fixPrompt }] }],
-        generationConfig: {
-          temperature: 0.1,
-          maxOutputTokens: 2048,
-        },
-      }),
     });
-
-    if (!response.ok) {
-      throw new Error('Fix prompt failed');
-    }
-
-    const data = await response.json();
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
     const cleanText = text?.replace(/```json?\n?/g, '').replace(/```/g, '').trim();
     
@@ -187,4 +182,101 @@ Remember the required schema:
       user_message: "I had trouble formatting my response. Please try rephrasing your request.",
     };
   }
+}
+
+async function callGemini(body: Record<string, unknown>) {
+  if (!GEMINI_API_KEY) {
+    throw new Error('Gemini API key is missing');
+  }
+
+  let lastError: string | null = null;
+  const models = await resolveModels();
+
+  for (const apiBase of GEMINI_API_BASES) {
+    for (const model of models) {
+      const normalizedModel = model.startsWith('models/') ? model.slice('models/'.length) : model;
+      const response = await fetch(`${apiBase}/${normalizedModel}:generateContent?key=${GEMINI_API_KEY}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      });
+
+      if (response.ok) {
+        return response.json();
+      }
+
+      const errorText = await response.text();
+      lastError = `Gemini API error ${response.status} (${apiBase}/${normalizedModel}): ${errorText}`;
+
+      if (response.status !== 404) {
+        console.error('[Gemini] API error:', lastError);
+        throw new Error(lastError);
+      }
+    }
+  }
+
+  console.error('[Gemini] API error:', lastError);
+  throw new Error(lastError || 'Gemini API error: 404');
+}
+
+async function resolveModels(): Promise<string[]> {
+  if (cachedResolvedModels) {
+    return cachedResolvedModels;
+  }
+
+  if (GEMINI_MODELS.length > 0) {
+    cachedResolvedModels = GEMINI_MODELS;
+    return cachedResolvedModels;
+  }
+
+  const discovered = await discoverModels();
+  if (discovered.length > 0) {
+    cachedResolvedModels = prioritizeModels(discovered);
+    return cachedResolvedModels;
+  }
+
+  cachedResolvedModels = FALLBACK_MODELS;
+  return cachedResolvedModels;
+}
+
+async function discoverModels(): Promise<string[]> {
+  const discovered = new Set<string>();
+
+  for (const apiBase of GEMINI_API_BASES) {
+    try {
+      const response = await fetch(`${apiBase}?key=${GEMINI_API_KEY}`);
+      if (!response.ok) {
+        continue;
+      }
+
+      const data = await response.json();
+      const models: Array<{ name?: string; supportedGenerationMethods?: string[] }> = data.models || [];
+
+      for (const model of models) {
+        if (!model.name) {
+          continue;
+        }
+        if (!model.supportedGenerationMethods?.includes('generateContent')) {
+          continue;
+        }
+        discovered.add(normalizeModelName(model.name));
+      }
+    } catch {
+      // Skip discovery failures and fall back to defaults.
+    }
+  }
+
+  return Array.from(discovered);
+}
+
+function prioritizeModels(available: string[]): string[] {
+  const availableSet = new Set(available.map((model) => normalizeModelName(model)));
+  const preferred = PREFERRED_MODELS.filter((model) => availableSet.has(model));
+  return preferred.length > 0 ? preferred : available;
+}
+
+function normalizeModelName(model: string): string {
+  return model.startsWith('models/') ? model.slice('models/'.length) : model;
 }
