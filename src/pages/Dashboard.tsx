@@ -16,6 +16,9 @@ import { calendar, CalendarEvent, Goal } from '../lib/api';
 
 const DAYS_OF_WEEK = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 const COLORS = ['bg-purple-500', 'bg-blue-500', 'bg-pink-500', 'bg-green-500', 'bg-orange-500', 'bg-cyan-500'];
+const HOUR_HEIGHT = 60; // pixels per hour
+const START_HOUR = 6; // 6 AM
+const END_HOUR = 22; // 10 PM
 
 export function Dashboard() {
   const navigate = useNavigate();
@@ -140,6 +143,28 @@ export function Dashboard() {
     // Convert from 0=Sunday to 0=Monday
     const mondayIndex = dayIndex === 0 ? 6 : dayIndex - 1;
     return DAYS_OF_WEEK[mondayIndex];
+  };
+
+  // Get events for a specific day
+  const getEventsForDay = (day: string) => {
+    return calendarEvents.filter((event) => getDayFromISO(event.start) === day);
+  };
+
+  // Calculate event position and height
+  const getEventStyle = (event: CalendarEvent) => {
+    const startDate = new Date(event.start);
+    const endDate = new Date(event.end);
+    
+    const startHour = startDate.getHours() + startDate.getMinutes() / 60;
+    const endHour = endDate.getHours() + endDate.getMinutes() / 60;
+    
+    const top = (startHour - START_HOUR) * HOUR_HEIGHT;
+    const height = (endHour - startHour) * HOUR_HEIGHT;
+    
+    return {
+      top: `${Math.max(0, top)}px`,
+      height: `${Math.max(20, height)}px`,
+    };
   };
 
   // Get current week date range
@@ -441,79 +466,117 @@ export function Dashboard() {
         {/* Weekly Calendar View */}
         <Card>
           <CardHeader>
-            <CardTitle>Weekly Schedule</CardTitle>
-            <CardDescription>
-              {isAuthenticated 
-                ? 'Your calendar events and focus blocks'
-                : 'Sign in to see your real calendar events'}
-            </CardDescription>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>Weekly Schedule</CardTitle>
+                <CardDescription>
+                  {isAuthenticated 
+                    ? `Showing ${calendarEvents.length} events from your Google Calendar`
+                    : 'Sign in to see your real calendar events'}
+                </CardDescription>
+              </div>
+              {isAuthenticated && (
+                <Button variant="outline" size="sm" onClick={fetchCalendarEvents} disabled={eventsLoading}>
+                  {eventsLoading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    'Refresh'
+                  )}
+                </Button>
+              )}
+            </div>
           </CardHeader>
           <CardContent>
             {eventsLoading ? (
               <div className="py-12 text-center">
                 <Loader2 className="mx-auto mb-4 h-8 w-8 animate-spin text-muted-foreground" />
-                <p className="text-muted-foreground">Loading calendar...</p>
+                <p className="text-muted-foreground">Loading calendar events...</p>
               </div>
             ) : (
               <div className="overflow-x-auto">
-                <div className="min-w-[800px]">
-                  {/* Days Header */}
-                  <div className="mb-4 grid grid-cols-8 gap-2">
-                    <div className="text-sm font-medium text-muted-foreground">Time</div>
-                    {DAYS_OF_WEEK.map((day) => (
-                      <div key={day} className="text-center text-sm font-medium">
-                        {day.slice(0, 3)}
-                      </div>
-                    ))}
+                <div className="min-w-[900px]">
+                  {/* Days Header with dates */}
+                  <div className="grid grid-cols-8 gap-1 mb-2 sticky top-0 bg-background z-10">
+                    <div className="text-sm font-medium text-muted-foreground p-2">Time</div>
+                    {DAYS_OF_WEEK.map((day, idx) => {
+                      const now = new Date();
+                      const dayOfWeek = now.getDay();
+                      const monday = new Date(now);
+                      monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1) + idx);
+                      const isToday = monday.toDateString() === now.toDateString();
+                      
+                      return (
+                        <div 
+                          key={day} 
+                          className={`text-center p-2 rounded-lg ${isToday ? 'bg-purple-500/20 text-purple-400' : ''}`}
+                        >
+                          <div className="text-sm font-medium">{day.slice(0, 3)}</div>
+                          <div className="text-xs text-muted-foreground">{monday.getDate()}</div>
+                        </div>
+                      );
+                    })}
                   </div>
 
-                  {/* Time Slots */}
-                  <div className="space-y-1">
-                    {Array.from({ length: 12 }, (_, i) => {
-                      const hour = 8 + i;
-                      const timeStr = `${hour.toString().padStart(2, '0')}:00`;
-
-                      return (
-                        <div key={hour} className="grid grid-cols-8 gap-2">
-                          <div className="py-2 text-xs text-muted-foreground">
-                            {hour > 12 ? hour - 12 : hour}:00 {hour >= 12 ? 'PM' : 'AM'}
+                  {/* Calendar Grid */}
+                  <div className="grid grid-cols-8 gap-1">
+                    {/* Time column */}
+                    <div className="relative" style={{ height: `${(END_HOUR - START_HOUR) * HOUR_HEIGHT}px` }}>
+                      {Array.from({ length: END_HOUR - START_HOUR }, (_, i) => {
+                        const hour = START_HOUR + i;
+                        return (
+                          <div 
+                            key={hour} 
+                            className="absolute w-full text-right pr-2 text-xs text-muted-foreground"
+                            style={{ top: `${i * HOUR_HEIGHT}px` }}
+                          >
+                            {hour === 0 ? '12 AM' : hour < 12 ? `${hour} AM` : hour === 12 ? '12 PM' : `${hour - 12} PM`}
                           </div>
-                          {DAYS_OF_WEEK.map((day) => {
-                            // Find events for this day/time
-                            const dayEvents = calendarEvents.filter((event) => {
-                              const eventDay = getDayFromISO(event.start);
-                              const eventStartMinutes = timeToMinutes(event.start);
-                              const eventEndMinutes = timeToMinutes(event.end);
-                              const slotMinutes = hour * 60;
-                              
-                              return (
-                                eventDay === day &&
-                                eventStartMinutes <= slotMinutes &&
-                                eventEndMinutes > slotMinutes
-                              );
-                            });
+                        );
+                      })}
+                    </div>
 
+                    {/* Day columns */}
+                    {DAYS_OF_WEEK.map((day) => {
+                      const dayEvents = getEventsForDay(day);
+                      
+                      return (
+                        <div 
+                          key={day} 
+                          className="relative border-l border-border"
+                          style={{ height: `${(END_HOUR - START_HOUR) * HOUR_HEIGHT}px` }}
+                        >
+                          {/* Hour grid lines */}
+                          {Array.from({ length: END_HOUR - START_HOUR }, (_, i) => (
+                            <div 
+                              key={i}
+                              className="absolute w-full border-t border-border/50"
+                              style={{ top: `${i * HOUR_HEIGHT}px` }}
+                            />
+                          ))}
+
+                          {/* Events */}
+                          {dayEvents.map((event) => {
+                            const style = getEventStyle(event);
+                            const startDate = new Date(event.start);
+                            const endDate = new Date(event.end);
+                            
                             return (
-                              <div key={day} className="relative min-h-[60px]">
-                                {dayEvents.map((event) => (
-                                  <div
-                                    key={event.id}
-                                    className={`absolute inset-x-0 rounded-md p-2 ${
-                                      event.isEliteBall
-                                        ? 'bg-purple-500/20 border-l-4 border-purple-500'
-                                        : 'border-2 border-dashed border-muted-foreground bg-muted/30'
-                                    }`}
-                                  >
-                                    <p className="text-xs font-medium truncate">{event.title}</p>
-                                    <p className="text-xs opacity-75">
-                                      {formatTime(event.start)} - {formatTime(event.end)}
-                                    </p>
-                                  </div>
-                                ))}
-
-                                {dayEvents.length === 0 && (
-                                  <div className="h-full rounded-md border border-dashed border-border bg-muted/10" />
-                                )}
+                              <div
+                                key={event.id}
+                                className={`absolute left-1 right-1 rounded-md p-1.5 overflow-hidden cursor-pointer transition-all hover:opacity-90 hover:shadow-lg ${
+                                  event.isEliteBall
+                                    ? 'bg-purple-500 text-white border-l-4 border-purple-300'
+                                    : 'bg-blue-500/80 text-white'
+                                }`}
+                                style={style}
+                                title={`${event.title}\n${formatTime(event.start)} - ${formatTime(event.end)}`}
+                              >
+                                <p className="text-xs font-semibold truncate leading-tight">
+                                  {event.title}
+                                </p>
+                                <p className="text-[10px] opacity-90 truncate">
+                                  {formatTime(event.start)} - {formatTime(event.end)}
+                                </p>
                               </div>
                             );
                           })}
@@ -528,12 +591,12 @@ export function Dashboard() {
             {/* Legend */}
             <div className="mt-6 flex flex-wrap gap-4 border-t border-border pt-4">
               <div className="flex items-center gap-2">
-                <div className="h-3 w-3 rounded-full bg-purple-500" />
-                <span className="text-sm text-muted-foreground">Focus Blocks</span>
+                <div className="h-3 w-6 rounded bg-purple-500" />
+                <span className="text-sm text-muted-foreground">Focus Blocks (EliteBall)</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="h-3 w-3 rounded-md border-2 border-dashed border-muted-foreground" />
-                <span className="text-sm text-muted-foreground">Calendar Events</span>
+                <div className="h-3 w-6 rounded bg-blue-500/80" />
+                <span className="text-sm text-muted-foreground">Google Calendar Events</span>
               </div>
             </div>
           </CardContent>
