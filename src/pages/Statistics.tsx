@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router';
 import { Navigation } from '../components/Navigation';
 import { Button } from '../components/ui/button';
 import { Card, CardContent } from '../components/ui/card';
@@ -12,6 +13,7 @@ import { useAuthContext } from '../components/AuthProvider';
 const COLORS = ['#a855f7', '#3b82f6', '#ec4899', '#10b981', '#f97316', '#06b6d4'];
 
 export function Statistics() {
+  const navigate = useNavigate();
   const { isAuthenticated } = useAuthContext();
   const { wrapped, loading, error } = useStats();
   const [currentSlide, setCurrentSlide] = useState(0);
@@ -416,6 +418,16 @@ export function Statistics() {
       <div className="min-h-screen bg-background">
         <Navigation />
         <div className="container mx-auto px-4 pt-24 pb-12">
+          <div className="mb-6">
+            <Button
+              variant="ghost"
+              className="-ml-2"
+              onClick={() => navigate('/')}
+            >
+              <ChevronLeft className="mr-2 h-4 w-4" />
+              Back to Dashboard
+            </Button>
+          </div>
           <div className="mb-6 flex items-center justify-between">
             <div>
               <h1>{wrapped?.month || 'This Month'} Statistics</h1>
@@ -634,6 +646,15 @@ export function Statistics() {
         onClick={() => setViewMode('summary')}
       >
         View Summary
+      </Button>
+
+      <Button
+        variant="ghost"
+        className="fixed top-4 left-4 text-white hover:bg-white/20"
+        onClick={() => navigate('/')}
+      >
+        <ChevronLeft className="mr-2 h-4 w-4" />
+        Back
       </Button>
     </div>
   );
