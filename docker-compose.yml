@@ -6,6 +6,8 @@ services:
     ports:
       - "3000:3000"
       - "3001:3001"
+    environment:
+      - NODE_OPTIONS=--max-old-space-size=4096
     env_file:
       - .env.local
     volumes:
