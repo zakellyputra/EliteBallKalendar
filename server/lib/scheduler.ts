@@ -221,82 +221,112 @@ export async function generateSchedule(
   // This ensures we don't double-book or overlap with existing focus blocks
   const busyIntervals = eventsToBusyIntervals(calendarEvents);
 
-  // Collect all free slots for the week
-  const allFreeSlots: TimeSlot[] = [];
-  
+  // Collect free slots organized by day for even distribution
+  interface DaySlots {
+    date: string;           // e.g., "2024-01-15"
+    slots: TimeSlot[];      // Free slots for this day
+  }
+  const slotsByDay: Map<string, DaySlots> = new Map();
+
   for (let day = new Date(actualWeekStart); day < actualWeekEnd; day.setDate(day.getDate() + 1)) {
     const dayWindow = getWorkingWindowForDay(day, workingWindow, timezone);
     if (dayWindow) {
+      const dayKey = dayWindow.start.toISOString().split('T')[0];
       const dayFreeSlots = computeFreeSlots(
         dayWindow.start,
         dayWindow.end,
         busyIntervals,
         minGapMinutes
       );
-      allFreeSlots.push(...dayFreeSlots);
+      if (dayFreeSlots.length > 0) {
+        slotsByDay.set(dayKey, { date: dayKey, slots: dayFreeSlots });
+      }
     }
   }
 
   // Calculate total available minutes (only counting time that can actually fit blocks)
   // A slot must be at least blockLengthMinutes to be usable
   let totalAvailableMinutes = 0;
-  for (const slot of allFreeSlots) {
-    const slotDuration = (slot.end.getTime() - slot.start.getTime()) / 60000;
-    if (slotDuration >= blockLengthMinutes) {
-      // Calculate how many blocks can fit (accounting for gaps between blocks)
-      const blockWithGap = blockLengthMinutes + minGapMinutes;
-      const numBlocks = Math.floor((slotDuration + minGapMinutes) / blockWithGap);
-      totalAvailableMinutes += numBlocks * blockLengthMinutes;
+  for (const dayData of slotsByDay.values()) {
+    for (const slot of dayData.slots) {
+      const slotDuration = (slot.end.getTime() - slot.start.getTime()) / 60000;
+      if (slotDuration >= blockLengthMinutes) {
+        // Calculate how many blocks can fit (accounting for gaps between blocks)
+        const blockWithGap = blockLengthMinutes + minGapMinutes;
+        const numBlocks = Math.floor((slotDuration + minGapMinutes) / blockWithGap);
+        totalAvailableMinutes += numBlocks * blockLengthMinutes;
+      }
     }
   }
 
   // Calculate total requested minutes
   const totalRequestedMinutes = goals.reduce((sum, g) => sum + g.targetMinutesPerWeek, 0);
 
-  // Greedy allocation: place blocks for each goal
-  const proposedBlocks: ProposedBlock[] = [];
-  const unscheduledGoals: { goalId: string; name: string; remainingMinutes: number }[] = [];
-
-  for (const goal of goals) {
-    let remainingMinutes = goal.targetMinutesPerWeek;
-    
-    // Try to allocate blocks
-    for (const slot of allFreeSlots) {
-      if (remainingMinutes <= 0) break;
-
-      const slotDuration = (slot.end.getTime() - slot.start.getTime()) / 60000;
-      if (slotDuration < blockLengthMinutes) continue;
-
-      // How many blocks can fit in this slot?
+  // Helper function to try placing a single block on a specific day
+  function tryPlaceBlockOnDay(
+    dayData: DaySlots,
+    goal: { id: string; name: string },
+    proposedBlocks: ProposedBlock[],
+    blockLengthMinutes: number,
+    minGapMinutes: number
+  ): boolean {
+    for (const slot of dayData.slots) {
       let slotStart = new Date(slot.start);
-      
-      while (remainingMinutes > 0) {
+
+      while (true) {
         const blockEnd = new Date(slotStart.getTime() + blockLengthMinutes * 60000);
-        
-        // Check if block fits in slot
         if (blockEnd > slot.end) break;
 
-        // Check for overlap with already proposed blocks
+        // Check overlap with existing proposed blocks
         const hasOverlap = proposedBlocks.some(
           b => new Date(b.start) < blockEnd && new Date(b.end) > slotStart
         );
-        
-        if (hasOverlap) {
-          slotStart = new Date(slotStart.getTime() + blockLengthMinutes * 60000 + minGapMinutes * 60000);
-          continue;
+
+        if (!hasOverlap) {
+          proposedBlocks.push({
+            goalId: goal.id,
+            goalName: goal.name,
+            start: slotStart.toISOString(),
+            end: blockEnd.toISOString(),
+            duration: blockLengthMinutes,
+          });
+          return true; // Successfully placed one block
         }
 
-        proposedBlocks.push({
-          goalId: goal.id,
-          goalName: goal.name,
-          start: slotStart.toISOString(),
-          end: blockEnd.toISOString(),
-          duration: blockLengthMinutes,
-        });
-
-        remainingMinutes -= blockLengthMinutes;
-        slotStart = new Date(blockEnd.getTime() + minGapMinutes * 60000);
+        slotStart = new Date(slotStart.getTime() + blockLengthMinutes * 60000 + minGapMinutes * 60000);
       }
+    }
+    return false; // No space on this day
+  }
+
+  // Round-robin allocation: distribute blocks evenly across days
+  const proposedBlocks: ProposedBlock[] = [];
+  const unscheduledGoals: { goalId: string; name: string; remainingMinutes: number }[] = [];
+
+  // Get ordered list of available days
+  const availableDays = [...slotsByDay.keys()].sort();
+
+  for (const goal of goals) {
+    let remainingMinutes = goal.targetMinutesPerWeek;
+    let dayIndex = 0;
+    let consecutiveFailures = 0;
+
+    // Round-robin: cycle through days, placing one block per day before repeating
+    while (remainingMinutes > 0 && consecutiveFailures < availableDays.length) {
+      const dayKey = availableDays[dayIndex % availableDays.length];
+      const dayData = slotsByDay.get(dayKey)!;
+
+      // Try to place one block on this day
+      const placed = tryPlaceBlockOnDay(dayData, goal, proposedBlocks, blockLengthMinutes, minGapMinutes);
+
+      if (placed) {
+        remainingMinutes -= blockLengthMinutes;
+        consecutiveFailures = 0;
+      } else {
+        consecutiveFailures++;
+      }
+
+      dayIndex++;
     }
 
     if (remainingMinutes > 0) {

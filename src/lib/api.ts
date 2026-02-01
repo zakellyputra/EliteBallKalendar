@@ -308,9 +308,18 @@ export interface WrappedData {
   blocksSkipped: number;
   rescheduleCount: number;
   recoveredMinutes: number;
-  tokensSaved: number;
   peakProductivityDay: string;
   peakProductivityHour: string;
   goalBreakdown: { goalId: string; name: string; hours: number }[];
   achievements: string[];
+  weeklyHours: { week: number; hours: number; label: string }[];
+  weekdayWeekendSplit: {
+    weekdayHours: number;
+    weekdayPercent: number;
+    weekendHours: number;
+    weekendPercent: number;
+    sentiment: 'positive' | 'neutral' | 'negative';
+  };
+  hoursAddedViaReschedule: number;
+  hoursAddedBreakdown: { goalId: string; name: string; hoursAdded: number }[];
 }
