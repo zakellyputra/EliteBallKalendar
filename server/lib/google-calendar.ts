@@ -128,7 +128,8 @@ export async function listEvents(
   userId: string,
   timeMin: Date,
   timeMax: Date,
-  selectedCalendarIds?: string[] | null
+  selectedCalendarIds?: string[] | null,
+  ebkCalendarId?: string | null
 ): Promise<CalendarEvent[]> {
   const calendar = await getCalendarClient(userId);
 
@@ -138,10 +139,23 @@ export async function listEvents(
     calendars = await listCalendarsInternal(calendar);
     setCachedCalendarList(userId, calendars);
   }
-  
+
   // Filter to only selected calendars if specified
   if (selectedCalendarIds && selectedCalendarIds.length > 0) {
     calendars = calendars.filter(cal => selectedCalendarIds.includes(cal.id));
+  }
+
+  // Always include EBK calendar if it exists and isn't already included
+  if (ebkCalendarId) {
+    const hasEbk = calendars.some(cal => cal.id === ebkCalendarId);
+    if (!hasEbk) {
+      // Get full calendar list to find EBK calendar
+      const allCalendars = await listCalendarsInternal(calendar);
+      const ebkCal = allCalendars.find(c => c.id === ebkCalendarId);
+      if (ebkCal) {
+        calendars.push(ebkCal);
+      }
+    }
   }
 
   // Fetch events from all calendars in parallel
