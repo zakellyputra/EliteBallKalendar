@@ -75,6 +75,7 @@
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "dev:client": "vite",
     "dev:server": "NODE_OPTIONS='--max-old-space-size=4096' tsx watch server/index.ts",
-    "build": "vite build"
+    "build": "vite build",
+    "vercel-build": "npm run build"
   }
 }
