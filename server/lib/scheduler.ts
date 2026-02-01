@@ -34,7 +34,7 @@ interface WorkingWindowDay {
 // Convert HH:mm string to minutes since midnight
 function timeToMinutes(time: string): number {
   const [hours, minutes] = time.split(':').map(Number);
-  return hours * 60 + minutes;
+  return (hours || 0) * 60 + (minutes || 0);
 }
 
 // Get working window for a specific day
@@ -44,7 +44,7 @@ function getWorkingWindowForDay(
 ): TimeSlot | null {
   const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
   const dayName = dayNames[date.getDay()];
-  const dayWindow = workingWindow[dayName];
+  const dayWindow = workingWindow[dayName || ''];
 
   if (!dayWindow || !dayWindow.enabled) {
     return null;

@@ -84,6 +84,7 @@ router.put('/events/:id', requireAuth, async (req: AuthenticatedRequest, res: Re
     }
     const { title, description, start, end } = req.body;
 
+    if (!id) return res.status(400).json({ error: 'Event ID required' });
     const event = await updateEvent(req.userId!, id, {
       title,
       description,
@@ -105,6 +106,7 @@ router.delete('/events/:id', requireAuth, async (req: AuthenticatedRequest, res:
     if (Array.isArray(id)) {
       return res.status(400).json({ error: 'Invalid event id' });
     }
+    if (!id) return res.status(400).json({ error: 'Event ID required' });
     await deleteEvent(req.userId!, id);
     res.json({ success: true });
   } catch (err: any) {

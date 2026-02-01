@@ -596,7 +596,7 @@ export function Statistics() {
           transition={{ duration: 0.5 }}
           className="h-full"
         >
-          {renderStorySlide(storySlides[currentSlide])}
+          {renderStorySlide(storySlides[currentSlide] as any)}
         </motion.div>
       </AnimatePresence>
 

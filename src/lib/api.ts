@@ -8,7 +8,7 @@ interface ApiResponse<T> {
 }
 
 async function getIdToken(): Promise<string | undefined> {
-  return firebaseAuth.currentUser ? firebaseAuth.currentUser.getIdToken() : undefined;
+  return firebaseAuth.currentUser?.getIdToken();
 }
 
 async function request<T>(
@@ -118,14 +118,19 @@ export const scheduler = {
 };
 
 // Reschedule
+export interface RescheduleRequest {
+  message: string;
+  history?: { role: 'user' | 'assistant'; content: string }[];
+}
+
 export const reschedule = {
-  request: (message: string) =>
+  request: (message: string, history: { role: 'user' | 'assistant'; content: string }[] = []) =>
     request<RescheduleResponse>('/reschedule', {
       method: 'POST',
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({ message, history }),
     }),
   apply: (operations: RescheduleOperation[]) =>
-    request<{ success: boolean; applied: number }>('/reschedule/apply', {
+    request<{ success: boolean; applied: number; blocksMovedCount: number; minutesRecovered: number }>('/reschedule/apply', {
       method: 'POST',
       body: JSON.stringify({ operations }),
     }),
@@ -180,6 +185,7 @@ export interface CalendarEvent {
   start: string;
   end: string;
   isEliteBall?: boolean;
+  type?: 'focus' | 'break' | 'reminder';
   goalId?: string;
   blockId?: string;
   calendarId?: string;
@@ -264,8 +270,10 @@ export interface InsufficientTimeInfo {
 
 export interface RescheduleOperation {
   op: 'move' | 'create' | 'delete';
+  type?: 'focus' | 'break' | 'reminder';
   blockId?: string;
   goalName?: string;
+  title?: string;
   from?: string;
   to?: string;
   start?: string;

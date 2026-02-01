@@ -61,17 +61,24 @@ async function buildContext(userId: string): Promise<string> {
     context += `Working window: ${JSON.stringify(settings.workingWindow)}\n`;
   }
   
-  context += `\n=== FOCUS BLOCKS (${start.toLocaleDateString()} to ${end.toLocaleDateString()}) ===\n`;
+  context += `\n=== FOCUS BLOCKS & BREAKS (${start.toLocaleDateString()} to ${end.toLocaleDateString()}) ===\n`;
   for (const block of focusBlocks) {
-    const goal = goalsById.get(block.goalId) as any;
-    const goalName = goal?.name || 'Unknown';
-    context += `- [${block.id}] ${goalName}: ${block.start} to ${block.end} (status: ${block.status})\n`;
+    let blockLabel = 'Unknown';
+    if (block.type === 'break') {
+      blockLabel = 'Break';
+    } else if (block.type === 'reminder') {
+      blockLabel = 'Reminder';
+    } else {
+      const goal = goalsById.get(block.goalId) as any;
+      blockLabel = goal?.name || 'Focus Block';
+    }
+    context += `- [${block.id}] ${blockLabel}: ${block.start} to ${block.end} (status: ${block.status}, type: ${block.type || 'focus'})\n`;
   }
 
   context += `\n=== OTHER CALENDAR EVENTS (${start.toLocaleDateString()} to ${end.toLocaleDateString()}) ===\n`;
   const nonFocusEvents = events.filter(e => !e.isEliteBall);
   for (const event of nonFocusEvents) {
-    context += `- ${event.title}: ${event.start} to ${event.end}\n`;
+    context += `- [${event.id}] ${event.title}: ${event.start} to ${event.end}\n`;
   }
 
   return context;
@@ -80,7 +87,7 @@ async function buildContext(userId: string): Promise<string> {
 // Process reschedule request
 router.post('/', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { message } = req.body;
+    const { message, history } = req.body;
 
     if (!message) {
       return res.status(400).json({ error: 'Message is required' });
@@ -95,7 +102,7 @@ router.post('/', requireAuth, async (req: AuthenticatedRequest, res: Response) =
     console.log(`[Reschedule] Context: ${originalLength} chars -> ${compressedLength} chars`);
 
     // Call Gemini
-    const result = await generateReschedule(message, compressed);
+    const result = await generateReschedule(message, compressed, history);
 
     res.json({
       ...result,
@@ -124,13 +131,13 @@ router.post('/apply', requireAuth, async (req: AuthenticatedRequest, res: Respon
       switch (op.op) {
         case 'move':
           if (op.blockId && op.to) {
-            // Find the focus block
+            // 1. Try to find in focusBlocks first
             const blockRef = firestore.collection('focusBlocks').doc(op.blockId);
             const blockSnap = await blockRef.get();
             const block = blockSnap.exists ? blockSnap.data() : null;
 
             if (block && block.userId === req.userId! && block.calendarEventId) {
-              // Calculate duration
+              // Internal Focus Block Logic
               const duration = new Date(block.end).getTime() - new Date(block.start).getTime();
               const newStart = new Date(op.to);
               const newEnd = new Date(newStart.getTime() + duration);
@@ -148,57 +155,124 @@ router.post('/apply', requireAuth, async (req: AuthenticatedRequest, res: Respon
                 end: newEnd.toISOString(),
                 status: 'moved',
               }, { merge: true });
-              
 
               blocksMovedCount++;
               minutesRecovered += duration / 60000;
+            } else {
+              // 2. Try to find in external calendar events
+              // We need to fetch events to find the correct calendarId
+              const now = new Date();
+              const start = new Date(now);
+              start.setDate(start.getDate() - 14); // 2 weeks ago
+              start.setHours(0, 0, 0, 0);
+
+              const end = new Date(now);
+              end.setDate(end.getDate() + 21); // 3 weeks from now
+              end.setHours(23, 59, 59, 999);
+
+              // Fetch settings to get selectedCalendars
+              const settingsDoc = await firestore.collection('settings').doc(req.userId!).get();
+              const settings = settingsDoc.exists ? settingsDoc.data() : null;
+              const selectedCalendars = settings?.selectedCalendars || null;
+
+              const events = await listEvents(req.userId!, start, end, selectedCalendars);
+              const event = events.find(e => e.id === op.blockId);
+
+              if (event) {
+                // Calculate duration
+                const duration = new Date(event.end).getTime() - new Date(event.start).getTime();
+                const newStart = new Date(op.to);
+                const newEnd = new Date(newStart.getTime() + duration);
+
+                // Update external event
+                await updateEvent(req.userId!, event.id, {
+                  start: newStart.toISOString(),
+                  end: newEnd.toISOString(),
+                }, event.calendarId);
+
+                blocksMovedCount++;
+                // We don't count minutesRecovered for external events as it's not "focus time" recovered
+              }
             }
           }
           break;
 
         case 'create':
-          if (op.goalName && op.start && op.end) {
-            // Find the goal
-            const goalSnapshot = await firestore.collection('goals')
-              .where('userId', '==', req.userId!)
-              .where('name', '==', op.goalName)
-              .get();
-            const goalDoc = goalSnapshot.docs[0];
-            const goal = goalDoc ? ({ id: goalDoc.id, ...goalDoc.data() } as any) : null;
+          if (op.start && op.end) {
+            // Determine type of block (default to focus if goalName present)
+            const type = op.type || (op.goalName ? 'focus' : 'reminder');
+            
+            // Get settings to retrieve EBK calendar info
+            const settingsDoc = await firestore.collection('settings').doc(req.userId!).get();
+            const settings = settingsDoc.exists ? settingsDoc.data() : null;
+            const ebkCalendarName = settings?.ebkCalendarName || 'EliteBall Focus Blocks';
+            const existingCalendarId = settings?.ebkCalendarId || null;
 
-            if (goal) {
-              // Get settings to retrieve EBK calendar info
-              const settingsDoc = await firestore.collection('settings').doc(req.userId!).get();
-              const settings = settingsDoc.exists ? settingsDoc.data() : null;
-              const ebkCalendarName = settings?.ebkCalendarName || 'EliteBall Focus Blocks';
-              const existingCalendarId = settings?.ebkCalendarId || null;
+            // Get or create the EBK calendar
+            const { id: calendarId, created } = await getOrCreateEbkCalendar(
+              req.userId!,
+              ebkCalendarName,
+              existingCalendarId
+            );
 
-              // Get or create the EBK calendar
-              const { id: calendarId, created } = await getOrCreateEbkCalendar(
-                req.userId!,
-                ebkCalendarName,
-                existingCalendarId
-              );
+            // Save the calendar ID to settings if newly created
+            if (created) {
+              await firestore.collection('settings').doc(req.userId!).set({
+                ebkCalendarId: calendarId,
+              }, { merge: true });
+            }
 
-              // Save the calendar ID to settings if newly created
-              if (created) {
-                await firestore.collection('settings').doc(req.userId!).set({
-                  ebkCalendarId: calendarId,
-                }, { merge: true });
+            let calendarEvent;
+            
+            if (type === 'focus' && op.goalName) {
+              // 1. FOCUS BLOCK LOGIC
+              // Find the goal
+              const goalSnapshot = await firestore.collection('goals')
+                .where('userId', '==', req.userId!)
+                .where('name', '==', op.goalName)
+                .get();
+              const goalDoc = goalSnapshot.docs[0];
+              const goal = goalDoc ? ({ id: goalDoc.id, ...goalDoc.data() } as any) : null;
+
+              if (goal) {
+                // Create calendar event
+                calendarEvent = await createEvent(req.userId!, {
+                  title: op.title || `Focus Block: ${op.goalName}`,
+                  description: `eliteball=true\ngoalId=${goal.id}\nblockId=pending`,
+                  start: op.start,
+                  end: op.end,
+                }, calendarId);
+
+                // Create focus block in database
+                await firestore.collection('focusBlocks').add({
+                  userId: req.userId!,
+                  goalId: goal.id,
+                  start: op.start,
+                  end: op.end,
+                  calendarEventId: calendarEvent.id,
+                  calendarId,
+                  status: 'scheduled',
+                  createdAt: new Date().toISOString(),
+                });
+                
+                const duration = (new Date(op.end).getTime() - new Date(op.start).getTime()) / 60000;
+                minutesRecovered += duration;
               }
-
-              // Create calendar event in the EBK calendar
-              const calendarEvent = await createEvent(req.userId!, {
-                title: `Focus Block: ${op.goalName}`,
-                description: `eliteball=true\ngoalId=${goal.id}\nblockId=pending`,
+            } else {
+              // 2. BREAK / REMINDER LOGIC
+              // Create event in EBK calendar
+              calendarEvent = await createEvent(req.userId!, {
+                title: op.title || (type === 'break' ? 'Break' : 'Reminder'),
+                description: `eliteball=true\ntype=${type}`,
                 start: op.start,
                 end: op.end,
               }, calendarId);
-
-              // Create focus block in database with calendarId
+              
+              // SAVE TO DB as a first-class block (goalId is null/optional)
               await firestore.collection('focusBlocks').add({
                 userId: req.userId!,
-                goalId: goal.id,
+                goalId: null, // No goal for breaks/reminders
+                type: type, // 'break' or 'reminder'
                 start: op.start,
                 end: op.end,
                 calendarEventId: calendarEvent.id,
@@ -206,20 +280,6 @@ router.post('/apply', requireAuth, async (req: AuthenticatedRequest, res: Respon
                 status: 'scheduled',
                 createdAt: new Date().toISOString(),
               });
-              
-              // Create focus block in database
-              await firestore.collection('focusBlocks').add({
-                userId: req.userId!,
-                goalId: goal.id,
-                start: op.start,
-                end: op.end,
-                calendarEventId: calendarEvent.id,
-                status: 'scheduled',
-                createdAt: new Date().toISOString(),
-              });
-              
-              const duration = (new Date(op.end).getTime() - new Date(op.start).getTime()) / 60000;
-              minutesRecovered += duration;
             }
           }
           break;

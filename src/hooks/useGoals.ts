@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { collection, addDoc, deleteDoc, doc, getDocs, orderBy, query, updateDoc, where, serverTimestamp } from 'firebase/firestore';
-import { Goal, CreateGoalInput } from '../lib/api';
-import { db } from '../lib/firebase';
+import { goals as goalsApi } from '../lib/api';
+import type { Goal, CreateGoalInput } from '../lib/api';
 import { useAuthContext } from '../components/AuthProvider';
 
 interface GoalsState {
@@ -27,28 +26,9 @@ export function useGoals() {
     setState(prev => ({ ...prev, loading: true, error: null }));
 
     try {
-      const goalsQuery = query(
-        collection(db, 'goals'),
-        where('userId', '==', user.id),
-        orderBy('createdAt', 'desc')
-      );
-      const snapshot = await getDocs(goalsQuery);
-      const goals = snapshot.docs.map((docSnap) => {
-        const data = docSnap.data() as Omit<Goal, 'id'> & { createdAt?: any };
-        const createdAt = data.createdAt?.toDate?.()
-          ? data.createdAt.toDate().toISOString()
-          : typeof data.createdAt === 'string'
-            ? data.createdAt
-            : new Date().toISOString();
-        return {
-          id: docSnap.id,
-          userId: data.userId,
-          name: data.name,
-          targetMinutesPerWeek: data.targetMinutesPerWeek,
-          createdAt,
-        };
-      });
-      setState({ goals, loading: false, error: null });
+      const { data, error } = await goalsApi.list();
+      if (error) throw new Error(error);
+      setState({ goals: data?.goals || [], loading: false, error: null });
     } catch (err: any) {
       setState({ goals: [], loading: false, error: err.message || 'Failed to fetch goals' });
     }
@@ -61,25 +41,17 @@ export function useGoals() {
   const createGoal = useCallback(async (data: CreateGoalInput): Promise<Goal | null> => {
     if (!user) return null;
     try {
-      const docRef = await addDoc(collection(db, 'goals'), {
-        userId: user.id,
-        name: data.name,
-        targetMinutesPerWeek: data.targetMinutesPerWeek,
-        createdAt: serverTimestamp(),
-      });
-      const goal: Goal = {
-        id: docRef.id,
-        userId: user.id,
-        name: data.name,
-        targetMinutesPerWeek: data.targetMinutesPerWeek,
-        createdAt: new Date().toISOString(),
-      };
+      const { data: result, error } = await goalsApi.create(data);
+      if (error || !result?.goal) throw new Error(error || 'Failed to create goal');
+      
+      const goal = result.goal;
       setState(prev => ({
         ...prev,
         goals: [goal, ...prev.goals],
       }));
       return goal;
     } catch (err) {
+      console.error('Create goal error:', err);
       return null;
     }
   }, [user]);
@@ -87,18 +59,16 @@ export function useGoals() {
   const updateGoal = useCallback(async (id: string, data: Partial<CreateGoalInput>): Promise<boolean> => {
     if (!user) return false;
     try {
-      const updateData: any = {};
-      if (data.name !== undefined) updateData.name = data.name;
-      if (data.targetMinutesPerWeek !== undefined) {
-        updateData.targetMinutesPerWeek = data.targetMinutesPerWeek;
-      }
-      await updateDoc(doc(db, 'goals', id), updateData);
+      const { error } = await goalsApi.update(id, data);
+      if (error) throw new Error(error);
+      
       setState(prev => ({
         ...prev,
-        goals: prev.goals.map(g => g.id === id ? { ...g, ...updateData } : g),
+        goals: prev.goals.map(g => g.id === id ? { ...g, ...data } : g),
       }));
       return true;
     } catch (err) {
+      console.error('Update goal error:', err);
       return false;
     }
   }, [user]);
@@ -106,13 +76,16 @@ export function useGoals() {
   const deleteGoal = useCallback(async (id: string): Promise<boolean> => {
     if (!user) return false;
     try {
-      await deleteDoc(doc(db, 'goals', id));
+      const { error } = await goalsApi.delete(id);
+      if (error) throw new Error(error);
+      
       setState(prev => ({
         ...prev,
         goals: prev.goals.filter(g => g.id !== id),
       }));
       return true;
     } catch (err) {
+      console.error('Delete goal error:', err);
       return false;
     }
   }, [user]);

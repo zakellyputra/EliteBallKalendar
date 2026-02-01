@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth';
-import { User } from '../lib/api';
+import type { User } from '../lib/api';
 import { auth } from '../lib/firebase';
 
 interface AuthState {

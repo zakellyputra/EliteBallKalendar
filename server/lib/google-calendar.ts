@@ -47,6 +47,7 @@ export interface CalendarEvent {
   start: string; // ISO string
   end: string; // ISO string
   isEliteBall?: boolean;
+  type?: 'focus' | 'break' | 'reminder'; // New field
   goalId?: string;
   blockId?: string;
   calendarId?: string;
@@ -163,6 +164,13 @@ export async function listEvents(
         const isEliteBall = description.includes('eliteball=true');
         const goalIdMatch = description.match(/goalId=([^\n]+)/);
         const blockIdMatch = description.match(/blockId=([^\n]+)/);
+        const typeMatch = description.match(/type=([^\n]+)/); // Parse type
+        
+        // Default to 'focus' if eliteball=true but no type specified (backward compatibility)
+        let type: 'focus' | 'break' | 'reminder' | undefined;
+        if (isEliteBall) {
+          type = (typeMatch?.[1] as any) || 'focus';
+        }
 
         return {
           id: event.id!,
@@ -171,6 +179,7 @@ export async function listEvents(
           start: event.start?.dateTime || event.start?.date!,
           end: event.end?.dateTime || event.end?.date!,
           isEliteBall,
+          type,
           goalId: goalIdMatch?.[1],
           blockId: blockIdMatch?.[1],
           calendarId: calInfo.id,

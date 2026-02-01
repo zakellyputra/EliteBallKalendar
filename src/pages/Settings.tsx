@@ -155,8 +155,9 @@ export function Settings() {
     setWorkingWindow(prev => ({
       ...prev,
       [dayKey]: {
-        ...prev[dayKey],
         enabled: !prev[dayKey].enabled,
+        start: prev[dayKey].start,
+        end: prev[dayKey].end,
       },
     }));
   };
@@ -165,7 +166,9 @@ export function Settings() {
     setWorkingWindow(prev => ({
       ...prev,
       [dayKey]: {
-        ...prev[dayKey],
+        enabled: prev[dayKey].enabled,
+        start: prev[dayKey].start,
+        end: prev[dayKey].end,
         [field]: value,
       },
     }));

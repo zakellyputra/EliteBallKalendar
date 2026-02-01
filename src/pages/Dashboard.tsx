@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate } from 'react-router-dom';
 import { Navigation } from '../components/Navigation';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
@@ -303,7 +303,8 @@ export function Dashboard() {
   const goToCurrentWeek = () => setWeekOffset(0);
 
   const totalGoalHours = goals.reduce((sum, g) => sum + g.targetMinutesPerWeek / 60, 0);
-  const focusBlocks = calendarEvents.filter(e => e.isEliteBall);
+  // Only count actual FOCUS blocks for stats, ignore breaks/reminders
+  const focusBlocks = calendarEvents.filter(e => e.isEliteBall && (!e.type || e.type === 'focus'));
 
   // Drag and drop state
   const [activeDragBlock, setActiveDragBlock] = useState<ProposedBlock | null>(null);
@@ -320,19 +321,19 @@ export function Dashboard() {
     if (!overId.startsWith('slot-')) return;
     
     const [, day, hourStr] = overId.split('-');
-    const hour = parseInt(hourStr);
+    const hour = parseInt(hourStr || '0');
     
     // Get the block index from active id (format: "block-{index}")
     const activeId = active.id as string;
     if (!activeId.startsWith('block-')) return;
     
-    const blockIndex = parseInt(activeId.split('-')[1]);
+    const blockIndex = parseInt(activeId.split('-')[1] || '0');
     const block = proposedBlocks[blockIndex];
     if (!block) return;
     
     // Calculate new start/end times
     const { monday } = getWeekDates(weekOffset);
-    const dayIndex = DAYS_OF_WEEK.indexOf(day);
+    const dayIndex = DAYS_OF_WEEK.indexOf(day || '');
     const newDate = new Date(monday);
     newDate.setDate(monday.getDate() + dayIndex);
     newDate.setHours(hour, 0, 0, 0);
@@ -376,9 +377,9 @@ export function Dashboard() {
     for (const day of days) {
       const dayWindow = settings.workingWindow[day];
       if (dayWindow?.enabled) {
-        const [startH] = dayWindow.start.split(':').map(Number);
-        const [endH] = dayWindow.end.split(':').map(Number);
+        const startH = parseInt(dayWindow.start.split(':')[0] || '0');
         if (startH < earliestStart) earliestStart = startH;
+        const endH = parseInt(dayWindow.end.split(':')[0] || '0');
         if (endH > latestEnd) latestEnd = endH;
       }
     }
@@ -409,7 +410,7 @@ export function Dashboard() {
     // For each day, compute free slots like the scheduler does
     for (let dayIdx = 0; dayIdx < 7; dayIdx++) {
       const dayName = dayNames[dayIdx];
-      const dayWindow = settings.workingWindow[dayName];
+      const dayWindow = settings.workingWindow[dayName] as WorkingWindow[string] | undefined;
 
       if (!dayWindow?.enabled) continue;
 
@@ -793,7 +794,7 @@ export function Dashboard() {
                         <div 
                           key={index} 
                           className={`rounded-lg border p-3 ${getGoalColorByName(block.goalName)}/10 border-l-4`}
-                          style={{ borderLeftColor: getGoalColorByName(block.goalName).replace('bg-', '') }}
+                          style={{ borderLeftColor: (getGoalColorByName(block.goalName) || '').replace('bg-', '') }}
                         >
                           <p className="font-medium text-sm">{block.goalName}</p>
                           <p className="text-xs text-muted-foreground">
@@ -876,7 +877,7 @@ export function Dashboard() {
               <DndContext onDragEnd={handleDragEnd} onDragStart={(event) => {
                 const activeId = event.active.id as string;
                 if (activeId.startsWith('block-')) {
-                  const blockIndex = parseInt(activeId.split('-')[1]);
+                  const blockIndex = parseInt(activeId.split('-')[1] || '0');
                   setActiveDragBlock(proposedBlocks[blockIndex] || null);
                 }
               }}>
@@ -953,7 +954,9 @@ export function Dashboard() {
                                     key={event.id}
                                     className={`absolute inset-x-0 rounded-md p-2 ${
                                       event.isEliteBall
-                                        ? 'bg-purple-500/20 border-l-4 border-purple-500'
+                                        ? (event.type === 'break' || event.type === 'reminder'
+                                            ? 'bg-orange-500/20 border-l-4 border-orange-500' // Breaks/Reminders = Orange
+                                            : 'bg-purple-500/20 border-l-4 border-purple-500') // Focus = Purple
                                         : 'border-2 border-dashed border-muted-foreground bg-muted/30'
                                     }`}
                                   >

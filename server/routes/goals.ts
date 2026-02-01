@@ -58,6 +58,7 @@ router.put('/:id', requireAuth, async (req: AuthenticatedRequest, res: Response)
     const { name, targetMinutesPerWeek } = req.body;
 
     // Verify ownership
+    if (!id) return res.status(400).json({ error: 'Goal ID required' });
     const docRef = firestore.collection('goals').doc(id);
     const existing = await docRef.get();
     if (!existing.exists || existing.data()?.userId !== req.userId!) {

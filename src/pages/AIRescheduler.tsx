@@ -4,11 +4,12 @@ import { Button } from '../components/ui/button';
 import { Card, CardContent } from '../components/ui/card';
 import { Input } from '../components/ui/input';
 import { Badge } from '../components/ui/badge';
-import { Send, Bot, User, Sparkles, Calendar, Clock, ChevronDown, ChevronUp, Check, Loader2, Volume2 } from 'lucide-react';
+import { Send, Bot, User, Sparkles, Calendar, Clock, ChevronDown, ChevronUp, Check, Loader2, Volume2, Trash2 } from 'lucide-react';
 import { ScrollArea } from '../components/ui/scroll-area';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../components/ui/collapsible';
 import { useAuthContext } from '../components/AuthProvider';
-import { reschedule, RescheduleResponse, RescheduleOperation } from '../lib/api';
+import { reschedule } from '../lib/api';
+import type { RescheduleResponse, RescheduleOperation } from '../lib/api';
 import { toast } from 'sonner';
 import { VoiceInput } from '../components/VoiceInput';
 import { VoiceOutput } from '../components/VoiceOutput';
@@ -39,15 +40,31 @@ const QUICK_PROMPTS = [
 
 export function AIRescheduler() {
   const { isAuthenticated } = useAuthContext();
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: '1',
-      role: 'assistant',
-      content: "Hi! I'm your AI scheduling assistant powered by Gemini. I can help you reschedule work blocks, adjust your weekly plan, or work around unexpected events. What would you like to change today?",
-      timestamp: new Date(),
-      suggestions: QUICK_PROMPTS.slice(0, 3),
-    },
-  ]);
+  const [messages, setMessages] = useState<Message[]>(() => {
+    // Try to load from localStorage
+    const saved = localStorage.getItem('ai-chat-history');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        // Convert string timestamps back to Date objects
+        return parsed.map((m: any) => ({
+          ...m,
+          timestamp: new Date(m.timestamp)
+        }));
+      } catch (e) {
+        console.error('Failed to parse chat history', e);
+      }
+    }
+    return [
+      {
+        id: '1',
+        role: 'assistant',
+        content: "Hi! I'm your AI scheduling assistant powered by Gemini. I can help you reschedule work blocks, adjust your weekly plan, or work around unexpected events. What would you like to change today?",
+        timestamp: new Date(),
+        suggestions: QUICK_PROMPTS.slice(0, 3),
+      },
+    ];
+  });
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [pendingOperations, setPendingOperations] = useState<RescheduleOperation[]>([]);
@@ -55,11 +72,29 @@ export function AIRescheduler() {
   const [showJsonDrawer, setShowJsonDrawer] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // Persist messages to localStorage
+  useEffect(() => {
+    localStorage.setItem('ai-chat-history', JSON.stringify(messages));
+  }, [messages]);
+
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages]);
+
+  // Clear history function
+  const clearHistory = () => {
+    const initialMessage: Message = {
+      id: Date.now().toString(),
+      role: 'assistant',
+      content: "Chat history cleared. How can I help you with your schedule?",
+      timestamp: new Date(),
+      suggestions: QUICK_PROMPTS.slice(0, 3),
+    };
+    setMessages([initialMessage]);
+    localStorage.removeItem('ai-chat-history');
+  };
 
   const handleVoiceInput = (transcript: string) => {
     setInput(transcript);
@@ -88,7 +123,11 @@ export function AIRescheduler() {
     setInput('');
     setIsTyping(true);
 
-    const result = await reschedule.request(textToSend);
+    const history = messages
+      .filter(m => m.id !== userMessage.id) // Exclude current message
+      .map(m => ({ role: m.role, content: m.content }));
+
+    const result = await reschedule.request(textToSend, history);
 
     if (result.error) {
       setMessages((prev) => [
@@ -150,7 +189,7 @@ export function AIRescheduler() {
         {
           id: (Date.now() + 1).toString(),
           role: 'assistant',
-          content: `Done! I've applied ${result.data.applied} changes to your calendar. ${result.data.blocksMovedCount} blocks were moved, recovering ${result.data.minutesRecovered} minutes of focus time.`,
+          content: `Done! I've applied ${result.data?.applied} changes to your calendar. ${result.data?.blocksMovedCount} blocks were moved, recovering ${result.data?.minutesRecovered} minutes of focus time.`,
           timestamp: new Date(),
           suggestions: ['Show me my updated schedule', 'Make another change'],
         },
@@ -163,11 +202,11 @@ export function AIRescheduler() {
   const formatOperation = (op: RescheduleOperation): string => {
     switch (op.op) {
       case 'move':
-        return `Move block to ${new Date(op.to!).toLocaleString()}`;
+        return `Move "${op.title || 'block'}" to ${new Date(op.to!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} ${new Date(op.to!).toLocaleDateString()}`;
       case 'create':
-        return `Create ${op.goalName} block at ${new Date(op.start!).toLocaleString()}`;
+        return `Create "${op.title || op.goalName || 'block'}" at ${new Date(op.start!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
       case 'delete':
-        return `Remove block ${op.blockId}`;
+        return `Remove "${op.title || op.blockId}"`;
       default:
         return JSON.stringify(op);
     }
@@ -190,6 +229,19 @@ export function AIRescheduler() {
               <Badge variant="outline" className="ml-2 gap-1">
                 <span className="text-blue-500">✦</span> Powered by Gemini
               </Badge>
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="ml-auto text-xs text-muted-foreground hover:text-destructive"
+                onClick={() => {
+                  if (confirm('Are you sure you want to clear the chat history?')) {
+                    clearHistory();
+                  }
+                }}
+              >
+                <Trash2 className="h-3 w-3 mr-1" />
+                Clear History
+              </Button>
             </div>
             <p className="text-muted-foreground">
               Tell me what changed, and I'll help you adjust your schedule in real-time
@@ -315,40 +367,6 @@ export function AIRescheduler() {
                               />
                             </div>
                           </div>
-                        )}
-
-                        {/* Token Stats (Bear1 metrics) */}
-                        {message.tokenStats && (
-                          <div className="max-w-[80%]">
-                            <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2">
-                              <p className="text-xs font-medium text-cyan-600 dark:text-cyan-400">
-                                Context compressed by Bear1:
-                              </p>
-                              <p className="text-xs text-muted-foreground">
-                                {message.tokenStats.rawChars.toLocaleString()} → {message.tokenStats.compressedChars.toLocaleString()} chars
-                                <span className="ml-2 text-green-500">
-                                  ({Math.round((1 - message.tokenStats.compressedChars / message.tokenStats.rawChars) * 100)}% saved)
-                                </span>
-                              </p>
-                            </div>
-                          </div>
-                        )}
-
-                        {/* JSON Drawer */}
-                        {message.rawJson && (
-                          <Collapsible open={showJsonDrawer} onOpenChange={setShowJsonDrawer}>
-                            <CollapsibleTrigger asChild>
-                              <Button variant="ghost" size="sm" className="text-xs gap-1">
-                                {showJsonDrawer ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-                                View Gemini JSON Plan
-                              </Button>
-                            </CollapsibleTrigger>
-                            <CollapsibleContent>
-                              <pre className="mt-2 max-w-[80%] overflow-auto rounded-lg bg-muted p-3 text-xs">
-                                {message.rawJson}
-                              </pre>
-                            </CollapsibleContent>
-                          </Collapsible>
                         )}
 
                         {/* Suggestions */}

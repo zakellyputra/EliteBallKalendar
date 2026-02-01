@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
-import { scheduler, ProposedBlock, InsufficientTimeInfo } from '../lib/api';
+import { scheduler } from '../lib/api';
+import type { ProposedBlock, InsufficientTimeInfo } from '../lib/api';
 
 interface SchedulerState {
   proposedBlocks: ProposedBlock[];

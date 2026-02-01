@@ -26,8 +26,10 @@ let cachedResolvedModels: string[] | null = null;
 
 export interface RescheduleOperation {
   op: 'move' | 'create' | 'delete';
+  type?: 'focus' | 'break' | 'reminder'; // New field to distinguish block types
   blockId?: string;
   goalName?: string;
+  title?: string; // Name of the event/block being moved or created
   from?: string;
   to?: string;
   start?: string;
@@ -41,42 +43,60 @@ export interface RescheduleResult {
   user_message: string;
 }
 
-const SYSTEM_PROMPT = `You are an AI scheduling assistant for EliteBallKalendar. Your job is to help users reschedule their focus blocks based on natural language requests.
+const SYSTEM_PROMPT = `You are an AI scheduling assistant for EliteBallKalendar. Your job is to help users reschedule their focus blocks, add breaks, and set reminders based on natural language requests.
 
 You will receive context about the user's:
 - Current schedule (focus blocks and calendar events)
 - Working window settings (which days/hours are enabled for focus work)
 - Goals and their target hours
 
-Based on the user's request, you must output ONLY valid JSON with no prose before or after. The JSON must follow this exact schema:
+Based on the user's request AND the conversation history, you must output ONLY valid JSON with no prose before or after. The JSON must follow this exact schema:
 
 {
-  "intent": "reschedule" | "confirm_outside_hours",
+  "intent": "reschedule" | "confirm_outside_hours" | "clarify",
   "reason": "Brief explanation of what you're doing",
   "operations": [
-    {"op": "move", "blockId": "xxx", "from": "ISO_DATE", "to": "ISO_DATE"},
-    {"op": "create", "goalName": "CS251", "start": "ISO_DATE", "end": "ISO_DATE"},
-    {"op": "delete", "blockId": "xxx"}
+    {"op": "move", "blockId": "xxx", "title": "Event Name", "from": "ISO_DATE", "to": "ISO_DATE"},
+    {"op": "create", "type": "focus", "goalName": "CS251", "title": "Focus Block: CS251", "start": "ISO_DATE", "end": "ISO_DATE"},
+    {"op": "create", "type": "break", "title": "Coffee Break", "start": "ISO_DATE", "end": "ISO_DATE"},
+    {"op": "create", "type": "reminder", "title": "Call Mom", "start": "ISO_DATE", "end": "ISO_DATE"},
+    {"op": "delete", "blockId": "xxx", "title": "Event Name"}
   ],
-  "user_message": "Friendly message to show the user about what you did"
+  "user_message": "Friendly message to show the user about what you did or asking for clarification"
 }
 
 Rules:
-1. Only output JSON, no other text
-2. Use ISO 8601 format for all dates (e.g., "2026-01-31T14:00:00.000Z")
-3. When moving blocks, ensure the new time doesn't conflict with existing events
-4. If the user wants to move/create blocks OUTSIDE their working window (disabled days or outside hours), DO NOT refuse. Instead:
-   - Set intent to "confirm_outside_hours"
-   - Still include the operations the user requested
-   - In user_message, note that this is outside their normal working hours and ask if they want to proceed
-5. Keep the user_message concise and friendly
-6. If you truly can't fulfill the request (e.g., block doesn't exist, time conflict), explain why in user_message and set operations to empty array
-7. IMPORTANT: Look carefully at the FOCUS BLOCKS section in the context - these are the blocks you can move. Match block IDs exactly.`;
+1. Only output JSON, no other text.
+2. Use ISO 8601 format for all dates (e.g., "2026-01-31T14:00:00.000Z").
+3. **Session Memory & Context**: 
+    - CRITICAL: You must READ the conversation history to understand the user's intent.
+    - If the user provides partial info (e.g., "start at 2pm"), look at the previous messages to find what they are talking about (e.g., a "2-hour break").
+    - MERGE the new info with the previous intent. Do NOT treat the new message as a standalone request if it's clearly a follow-up.
+    - Example: User says "I need a break", you ask "When?", User says "2pm". -> You must create a break at 2pm.
+ 4. **Block Types & Validation**:
+    - **Focus Blocks** (type="focus"): REQUIRE a "goalName" from the user's goals. Only use this if the user mentions a goal or "focus work".
+    - **Breaks** (type="break"): Do NOT require a goal. Create these when the user asks for a "break", "rest", "lunch", etc.
+    - **Reminders** (type="reminder"): Do NOT require a goal. Create these for specific tasks like "call mom", "email boss".
+ 5. **Handling Empty Time**:
+    - Do NOT assume empty time means the user "already has a break".
+    - If the user explicitly asks for a break, SCHEDULE IT as a distinct event (op="create", type="break").
+ 6. **Clarification**: If the request is ambiguous (e.g., "schedule a block" but no goal/time specified), set intent="clarify", operations=[], and ask the user for details in user_message.
+ 7. **Time Conflicts**: Check for conflicts. If a move/create conflicts, try to find the next available slot or ask the user.
+ 8. **External Events**: You can move/delete "OTHER CALENDAR EVENTS" if requested. Use the ID provided in the context.
+ 9. **Outside Hours**: If the request is outside working hours, set intent="confirm_outside_hours" but STILL generate the operations.
+ `;
 
 export async function generateReschedule(
   userMessage: string,
-  context: string
+  context: string,
+  history: { role: 'user' | 'assistant'; content: string }[] = []
 ): Promise<RescheduleResult> {
+  console.log('--- [Gemini Debug] Start Request ---');
+  console.log('User Message:', userMessage);
+  console.log('Context Length:', context.length);
+  console.log('History Items:', history.length);
+  console.log('History Content:', JSON.stringify(history, null, 2));
+
   if (!GEMINI_API_KEY) {
     // Return mock response for development
     console.log('[Gemini] No API key configured, returning mock response');
@@ -89,11 +109,20 @@ export async function generateReschedule(
   }
 
   try {
+    const historyParts = history.map(msg => ({
+      role: msg.role === 'user' ? 'user' : 'model',
+      parts: [{ text: msg.content }],
+    }));
+
     const data = await callGemini({
+      system_instruction: {
+        parts: [{ text: SYSTEM_PROMPT }]
+      },
       contents: [
+        ...historyParts,
         {
+          role: 'user',
           parts: [
-            { text: SYSTEM_PROMPT },
             { text: `Context:\n${context}` },
             { text: `User request: ${userMessage}` },
           ],
@@ -192,6 +221,8 @@ async function callGemini(body: Record<string, unknown>) {
   if (!GEMINI_API_KEY) {
     throw new Error('Gemini API key is missing');
   }
+
+  console.log('[Gemini] FULL API PAYLOAD:', JSON.stringify(body, null, 2));
 
   let lastError: string | null = null;
   const models = await resolveModels();
