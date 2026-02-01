@@ -16,6 +16,25 @@ interface CacheEntry<T> {
 const calendarListCache = new Map<string, CacheEntry<CalendarInfo[]>>();
 const CALENDAR_LIST_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
+const RATE_LIMIT_RETRIES = 3;
+const RATE_LIMIT_BASE_DELAY_MS = 500;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRateLimitError(error: unknown): boolean {
+  const err = error as {
+    response?: {
+      status?: number;
+      data?: { error?: { errors?: Array<{ reason?: string }> } };
+    };
+  };
+  const status = err?.response?.status;
+  const reasons = err?.response?.data?.error?.errors?.map((item) => item.reason) ?? [];
+  return status === 429 || reasons.includes('rateLimitExceeded') || reasons.includes('userRateLimitExceeded');
+}
+
 function getCachedCalendarList(userId: string): CalendarInfo[] | null {
   const entry = calendarListCache.get(userId);
   if (entry && Date.now() < entry.expiry) {
@@ -365,11 +384,21 @@ export async function deleteEvent(
   calendarId: string = 'primary'
 ): Promise<void> {
   const calendar = await getCalendarClient(userId);
-
-  await calendar.events.delete({
-    calendarId,
-    eventId,
-  });
+  for (let attempt = 0; attempt <= RATE_LIMIT_RETRIES; attempt += 1) {
+    try {
+      await calendar.events.delete({
+        calendarId,
+        eventId,
+      });
+      return;
+    } catch (error) {
+      if (!isRateLimitError(error) || attempt === RATE_LIMIT_RETRIES) {
+        throw error;
+      }
+      const delay = RATE_LIMIT_BASE_DELAY_MS * Math.pow(2, attempt);
+      await sleep(delay);
+    }
+  }
 }
 
 export function getWeekRange(date: Date = new Date()): { start: Date; end: Date } {

@@ -26,13 +26,19 @@ async function request<T>(
       },
     });
 
-    const data = await response.json();
+    const contentType = response.headers.get('content-type') || '';
+    const isJson = contentType.includes('application/json');
+    const rawText = isJson ? null : await response.text();
+    const data = isJson ? await response.json() : null;
 
     if (!response.ok) {
-      return { error: data.error || 'Request failed' };
+      if (isJson && data) {
+        return { error: data.error || 'Request failed' };
+      }
+      return { error: rawText || 'Request failed' };
     }
 
-    return { data };
+    return { data: (data ?? {}) as T };
   } catch (err: any) {
     return { error: err.message || 'Network error' };
   }
@@ -96,6 +102,10 @@ export const settings = {
     request<{ settings: Settings }>('/settings', {
       method: 'PUT',
       body: JSON.stringify(data),
+    }),
+  resetEbkCalendar: () =>
+    request<{ newCalendar: { id: string; name: string }; oldCalendarId: string | null }>('/settings/reset-ebk-calendar', {
+      method: 'POST',
     }),
 };
 

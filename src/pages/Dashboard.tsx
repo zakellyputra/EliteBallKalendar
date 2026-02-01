@@ -316,10 +316,34 @@ export function Dashboard() {
     }
 
     const blockCount = focusBlocks.length;
+    let deletedCount = 0;
+    const batchSize = 4;
+    const perDeleteDelayMs = 800;
+    const batchDelayMs = 3000;
+    const maxDeletesPerRun = 20;
     setDeletingBlocks(true);
     try {
-      // Delete all focus blocks for the current week
-      await Promise.all(focusBlocks.map(block => calendar.deleteEvent(block.id, block.calendarId)));
+      // Delete all focus blocks for the current week (batched + throttled)
+      for (let startIndex = 0; startIndex < focusBlocks.length; startIndex += batchSize) {
+        const batch = focusBlocks.slice(startIndex, startIndex + batchSize);
+        for (const block of batch) {
+          const result = await calendar.deleteEvent(block.id, block.calendarId);
+          if (result.error) {
+            throw new Error(result.error);
+          }
+          deletedCount += 1;
+          if (deletedCount >= maxDeletesPerRun && focusBlocks.length > deletedCount) {
+            break;
+          }
+          await new Promise(resolve => setTimeout(resolve, perDeleteDelayMs));
+        }
+        if (deletedCount >= maxDeletesPerRun) {
+          break;
+        }
+        if (startIndex + batchSize < focusBlocks.length) {
+          await new Promise(resolve => setTimeout(resolve, batchDelayMs));
+        }
+      }
 
       // Small delay for Google Calendar API eventual consistency
       await new Promise(resolve => setTimeout(resolve, 500));
@@ -328,11 +352,16 @@ export function Dashboard() {
       weekCacheRef.current.delete(getWeekCacheKey(weekOffset));
       await fetchCalendarEvents(true);
 
+      if (deletedCount < blockCount) {
+        toast.info(`Deleted ${deletedCount} of ${blockCount}. Rate limits require multiple passes—run delete again in a minute.`);
+        return;
+      }
       toast.success(`Deleted ${blockCount} focus block${blockCount > 1 ? 's' : ''}`);
       setDeleteDialogOpen(false);
     } catch (error) {
       console.error('Error deleting blocks:', error);
-      toast.error('Failed to delete some blocks');
+      const partial = deletedCount > 0 ? ` (deleted ${deletedCount} of ${blockCount})` : '';
+      toast.error(`Failed to delete all blocks${partial}. Try again in a minute.`);
     } finally {
       setDeletingBlocks(false);
     }
