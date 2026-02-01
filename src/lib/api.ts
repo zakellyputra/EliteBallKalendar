@@ -219,6 +219,8 @@ export interface Settings {
   timezone: string;
   minGapMinutes: number;
   selectedCalendars: string[] | null; // null means all calendars
+  ebkCalendarName?: string;  // Custom name for EBK calendar
+  ebkCalendarId?: string;    // ID of created EBK calendar
 }
 
 export interface WorkingWindow {
@@ -235,6 +237,7 @@ export interface UpdateSettingsInput {
   timezone?: string;
   minGapMinutes?: number;
   selectedCalendars?: string[] | null;
+  ebkCalendarName?: string;
 }
 
 export interface ProposedBlock {

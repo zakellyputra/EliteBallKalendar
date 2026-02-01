@@ -1,4 +1,4 @@
-import { CalendarEvent, listEvents, createEvent, getWeekRange } from './google-calendar';
+import { CalendarEvent, listEvents, createEvent, getWeekRange, getOrCreateEbkCalendar } from './google-calendar';
 import { firestore } from './firebase-admin';
 
 export interface ProposedBlock {
@@ -136,16 +136,17 @@ export async function generateSchedule(
   const workingWindow = settings.workingWindow as Record<string, WorkingWindowDay>;
   const blockLengthMinutes = settings.blockLengthMinutes as number;
   const minGapMinutes = settings.minGapMinutes as number;
+  const selectedCalendars = settings.selectedCalendars as string[] | null;
 
   // Fetch calendar events for the week (use provided dates or default to current week)
   const { start: defaultStart, end: defaultEnd } = getWeekRange();
   const actualWeekStart = weekStart || defaultStart;
   const actualWeekEnd = weekEnd || defaultEnd;
-  const calendarEvents = await listEvents(userId, actualWeekStart, actualWeekEnd);
+  const calendarEvents = await listEvents(userId, actualWeekStart, actualWeekEnd, selectedCalendars);
 
-  // Filter out existing focus blocks
-  const busyEvents = calendarEvents.filter(e => !e.isEliteBall);
-  const busyIntervals = eventsToBusyIntervals(busyEvents);
+  // Include ALL events as busy (including existing focus blocks)
+  // This ensures we don't double-book or overlap with existing focus blocks
+  const busyIntervals = eventsToBusyIntervals(calendarEvents);
 
   // Collect all free slots for the week
   const allFreeSlots: TimeSlot[] = [];
@@ -163,11 +164,18 @@ export async function generateSchedule(
     }
   }
 
-  // Calculate total available minutes
-  const totalAvailableMinutes = allFreeSlots.reduce(
-    (sum, slot) => sum + (slot.end.getTime() - slot.start.getTime()) / 60000,
-    0
-  );
+  // Calculate total available minutes (only counting time that can actually fit blocks)
+  // A slot must be at least blockLengthMinutes to be usable
+  let totalAvailableMinutes = 0;
+  for (const slot of allFreeSlots) {
+    const slotDuration = (slot.end.getTime() - slot.start.getTime()) / 60000;
+    if (slotDuration >= blockLengthMinutes) {
+      // Calculate how many blocks can fit (accounting for gaps between blocks)
+      const blockWithGap = blockLengthMinutes + minGapMinutes;
+      const numBlocks = Math.floor((slotDuration + minGapMinutes) / blockWithGap);
+      totalAvailableMinutes += numBlocks * blockLengthMinutes;
+    }
+  }
 
   // Calculate total requested minutes
   const totalRequestedMinutes = goals.reduce((sum, g) => sum + g.targetMinutesPerWeek, 0);
@@ -254,22 +262,45 @@ export async function applySchedule(
 ): Promise<{ id: string; calendarEventId: string; goalId: string; start: string; end: string }[]> {
   const appliedBlocks: { id: string; calendarEventId: string; goalId: string; start: string; end: string }[] = [];
 
+  // Get settings to retrieve EBK calendar info
+  const settingsRef = firestore.collection('settings').doc(userId);
+  const settingsDoc = await settingsRef.get();
+  const settings = settingsDoc.exists ? settingsDoc.data() : null;
+
+  const ebkCalendarName = settings?.ebkCalendarName || 'EliteBall Focus Blocks';
+  const existingCalendarId = settings?.ebkCalendarId || null;
+
+  // Get or create the EBK calendar
+  const { id: calendarId, created } = await getOrCreateEbkCalendar(
+    userId,
+    ebkCalendarName,
+    existingCalendarId
+  );
+
+  // Save the calendar ID to settings if newly created or if it changed
+  if (created || calendarId !== existingCalendarId) {
+    await settingsRef.set({
+      ebkCalendarId: calendarId,
+    }, { merge: true });
+  }
+
   for (const block of blocks) {
-    // Create calendar event
+    // Create calendar event in the EBK calendar
     const calendarEvent = await createEvent(userId, {
       title: `Focus Block: ${block.goalName}`,
       description: `eliteball=true\ngoalId=${block.goalId}\nblockId=pending`,
       start: block.start,
       end: block.end,
-    });
+    }, calendarId);
 
-    // Create FocusBlock in database
+    // Create FocusBlock in database with calendarId
     const focusBlockRef = await firestore.collection('focusBlocks').add({
       userId,
       goalId: block.goalId,
       start: block.start,
       end: block.end,
       calendarEventId: calendarEvent.id,
+      calendarId,
       status: 'scheduled',
       createdAt: new Date().toISOString(),
     });
