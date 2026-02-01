@@ -683,11 +683,48 @@ async function buildContext(userId: string): Promise<string> {
   
   context += `\n=== FOCUS BLOCKS (${start.toLocaleDateString()} to ${end.toLocaleDateString()}) ===\n`;
   context += `Total focus blocks available: ${focusBlocks.length}\n`;
+  
+  // Identify recently moved blocks (within last 24 hours) with their original positions
+  const recentlyMovedBlocks: Array<{ block: any; originalStart: string; originalEnd: string; lastMovedAt: string }> = [];
+  const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  
+  for (const block of focusBlocks) {
+    if (block.status === 'moved' && block.originalStart && block.originalEnd && block.lastMovedAt) {
+      const movedAt = new Date(block.lastMovedAt);
+      if (movedAt >= oneDayAgo) {
+        recentlyMovedBlocks.push({
+          block,
+          originalStart: block.originalStart,
+          originalEnd: block.originalEnd,
+          lastMovedAt: block.lastMovedAt,
+        });
+      }
+    }
+  }
+  
+  // Sort by most recently moved first
+  recentlyMovedBlocks.sort((a, b) => new Date(b.lastMovedAt).getTime() - new Date(a.lastMovedAt).getTime());
+  
+  if (recentlyMovedBlocks.length > 0) {
+    context += `\n⚠️ RECENTLY MOVED BLOCKS (can be moved back to original position):\n`;
+    for (let i = 0; i < recentlyMovedBlocks.length; i++) {
+      const { block, originalStart, originalEnd, lastMovedAt } = recentlyMovedBlocks[i];
+      const goal = goalsById.get(block.goalId) as any;
+      const goalName = goal?.name || 'Unknown';
+      const movedAtDate = new Date(lastMovedAt);
+      const hoursAgo = Math.round((now.getTime() - movedAtDate.getTime()) / (60 * 60 * 1000) * 10) / 10;
+      context += `${i === 0 ? '⭐ MOST RECENT: ' : ''}[${block.id}] ${goalName}: Currently at ${block.start} to ${block.end}, originally at ${originalStart} to ${originalEnd} (moved ${hoursAgo}h ago)\n`;
+    }
+    context += `\nIMPORTANT: When the user says "move back", "move it back", "undo", "revert", or similar phrases, they are referring to the MOST RECENTLY MOVED block (marked with ⭐). Use the originalStart and originalEnd times from that block.\n`;
+  }
+  
   let blockIndex = 1;
   for (const block of focusBlocks) {
     const goal = goalsById.get(block.goalId) as any;
     const goalName = goal?.name || 'Unknown';
-    context += `${blockIndex}. [${block.id}] ${goalName}: ${block.start} to ${block.end} (status: ${block.status})\n`;
+    const isRecentlyMoved = recentlyMovedBlocks.some(rmb => rmb.block.id === block.id);
+    const movedMarker = isRecentlyMoved ? ' (recently moved)' : '';
+    context += `${blockIndex}. [${block.id}] ${goalName}: ${block.start} to ${block.end} (status: ${block.status})${movedMarker}\n`;
     blockIndex++;
   }
   context += `\nCRITICAL INSTRUCTION: When the user asks to reschedule blocks (especially with numbers like "3 blocks", "all blocks", "my blocks", or plural language), you MUST:\n`;
@@ -1088,12 +1125,38 @@ router.post('/apply', requireAuth, async (req: AuthenticatedRequest, res: Respon
                 end: newEnd.toISOString(),
               }, calendarId);
 
+              // Store original position if not already stored (for "move back" functionality)
+              const originalStart = block.originalStart || block.start;
+              const originalEnd = block.originalEnd || block.end;
+              
+              // Check if moving back to original position
+              const isMovingBack = newStart.toISOString() === originalStart && newEnd.toISOString() === originalEnd;
+              
               // Update database
-              await blockRef.set({
+              const updateData: any = {
                 start: newStart.toISOString(),
                 end: newEnd.toISOString(),
                 status: 'moved',
-              }, { merge: true });
+                lastMovedAt: new Date().toISOString(), // Track when it was moved
+              };
+              
+              if (isMovingBack) {
+                // Clear original position fields since it's back to original
+                updateData.originalStart = null;
+                updateData.originalEnd = null;
+              } else {
+                // Store original position (only if not already stored)
+                if (!block.originalStart) {
+                  updateData.originalStart = originalStart;
+                  updateData.originalEnd = originalEnd;
+                } else {
+                  // Keep existing original position
+                  updateData.originalStart = block.originalStart;
+                  updateData.originalEnd = block.originalEnd;
+                }
+              }
+              
+              await blockRef.set(updateData, { merge: true });
               
 
               blocksMovedCount++;

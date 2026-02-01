@@ -94,7 +94,14 @@ Rules:
    - NEVER return fewer operations than the number of blocks requested - this is a critical error
    - Example: If user says "move my 3 focus blocks to Saturday" and there are 3 blocks listed, you MUST return exactly 3 move operations, one for each block ID
    - Double-check: Before finishing, count your operations and verify you have one operation per matching block
-12. CRITICAL: Always close all brackets and braces properly. Include ALL operations even if the JSON is long - completeness is more important than brevity. Do not truncate the operations array - include every single operation.`;
+12. CRITICAL: When the user says "move back", "move it back", "undo", "revert", "move the focus block back", or similar phrases referring to moving something back:
+   - Look for the "RECENTLY MOVED BLOCKS" section in the context
+   - Identify the MOST RECENTLY MOVED block (marked with ⭐)
+   - Use that block's blockId and move it back to its originalStart time (use originalStart as the "to" field)
+   - The "from" field should be the block's current start time
+   - If there are multiple recently moved blocks and the user doesn't specify which one, ALWAYS use the most recently moved one (marked with ⭐)
+   - Example: If the context shows "⭐ MOST RECENT: [block123] CS340: Currently at 2026-02-06T14:00:00.000Z to 2026-02-06T14:30:00.000Z, originally at 2026-02-05T09:00:00.000Z to 2026-02-05T09:30:00.000Z", and user says "move it back", return: {"op": "move", "blockId": "block123", "from": "2026-02-06T14:00:00.000Z", "to": "2026-02-05T09:00:00.000Z"}
+13. CRITICAL: Always close all brackets and braces properly. Include ALL operations even if the JSON is long - completeness is more important than brevity. Do not truncate the operations array - include every single operation.`;
 
 export async function generateReschedule(
   userMessage: string,
