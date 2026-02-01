@@ -714,29 +714,10 @@ export function Dashboard() {
                 </div>
                 <div className="flex gap-2">
                   {hasProposedBlocks && (
-                    <>
-                      <Button variant="outline" onClick={clear} disabled={applying}>
-                        <X className="mr-2 h-4 w-4" />
-                        Cancel
-                      </Button>
-                      <Button 
-                        onClick={handleApply} 
-                        className="bg-green-600 hover:bg-green-700"
-                        disabled={applying}
-                      >
-                        {applying ? (
-                          <>
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            Applying...
-                          </>
-                        ) : (
-                          <>
-                            <Check className="mr-2 h-4 w-4" />
-                            Apply to Calendar
-                          </>
-                        )}
-                      </Button>
-                    </>
+                    <Button variant="outline" onClick={clear} disabled={applying}>
+                      <X className="mr-2 h-4 w-4" />
+                      Cancel
+                    </Button>
                   )}
                   {!hasProposedBlocks && (
                     <Button 
@@ -757,6 +738,22 @@ export function Dashboard() {
                       )}
                     </Button>
                   )}
+                  <Button 
+                    onClick={handleApply} 
+                    disabled={applying || !hasProposedBlocks}
+                  >
+                    {applying ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Applying...
+                      </>
+                    ) : (
+                      <>
+                        <Check className="mr-2 h-4 w-4" />
+                        Apply to Calendar
+                      </>
+                    )}
+                  </Button>
                 </div>
               </div>
             </CardHeader>
