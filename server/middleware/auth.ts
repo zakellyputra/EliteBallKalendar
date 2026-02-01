@@ -1,20 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { prisma } from '../index';
-
-// In-memory session store (in production, use Redis or database)
-const sessions = new Map<string, string>(); // sessionToken -> userId
-
-export function setSession(sessionToken: string, userId: string): void {
-  sessions.set(sessionToken, userId);
-}
-
-export function getSession(sessionToken: string): string | undefined {
-  return sessions.get(sessionToken);
-}
-
-export function deleteSession(sessionToken: string): void {
-  sessions.delete(sessionToken);
-}
+import { firebaseAuth } from '../lib/firebase-admin';
 
 export interface AuthenticatedRequest extends Request {
   userId?: string;
@@ -25,33 +10,20 @@ export async function requireAuth(
   res: Response,
   next: NextFunction
 ): Promise<void> {
-  const sessionToken = req.cookies?.session;
-  
-  if (!sessionToken) {
-    res.status(401).json({ error: 'Not authenticated' });
-    return;
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    const idToken = authHeader.slice('Bearer '.length);
+    const decoded = await firebaseAuth.verifyIdToken(idToken);
+    req.userId = decoded.uid;
+    next();
+  } catch (err) {
+    res.status(401).json({ error: 'Invalid token' });
   }
-
-  const userId = getSession(sessionToken);
-  
-  if (!userId) {
-    res.status(401).json({ error: 'Invalid session' });
-    return;
-  }
-
-  // Verify user exists
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-  });
-
-  if (!user) {
-    deleteSession(sessionToken);
-    res.status(401).json({ error: 'User not found' });
-    return;
-  }
-
-  req.userId = userId;
-  next();
 }
 
 export async function optionalAuth(
@@ -59,13 +31,15 @@ export async function optionalAuth(
   res: Response,
   next: NextFunction
 ): Promise<void> {
-  const sessionToken = req.cookies?.session;
-  
-  if (sessionToken) {
-    const userId = getSession(sessionToken);
-    if (userId) {
-      req.userId = userId;
+  try {
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const idToken = authHeader.slice('Bearer '.length);
+      const decoded = await firebaseAuth.verifyIdToken(idToken);
+      req.userId = decoded.uid;
     }
+  } catch (err) {
+    req.userId = undefined;
   }
 
   next();

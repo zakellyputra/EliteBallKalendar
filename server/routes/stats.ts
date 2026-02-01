@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
-import { prisma } from '../index';
 import { requireAuth, AuthenticatedRequest } from '../middleware/auth';
+import { firestore } from '../lib/firebase-admin';
 
 const router = Router();
 
@@ -17,40 +17,50 @@ router.get('/', requireAuth, async (req: AuthenticatedRequest, res: Response) =>
     endOfMonth.setDate(0);
     endOfMonth.setHours(23, 59, 59, 999);
 
-    const focusBlocks = await prisma.focusBlock.findMany({
-      where: {
-        userId: req.userId!,
-        start: { gte: startOfMonth },
-        end: { lte: endOfMonth },
-      },
-      include: { goal: true },
-    });
+    const startIso = startOfMonth.toISOString();
+    const endIso = endOfMonth.toISOString();
+
+    const focusSnapshot = await firestore.collection('focusBlocks')
+      .where('userId', '==', req.userId!)
+      .where('start', '>=', startIso)
+      .where('end', '<=', endIso)
+      .get();
+    const focusBlocks = focusSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() })) as any[];
+
+    const goalSnapshot = await firestore.collection('goals')
+      .where('userId', '==', req.userId!)
+      .get();
+    const goalsById = new Map(goalSnapshot.docs.map(docSnap => [docSnap.id, docSnap.data()]));
 
     // Calculate stats
     const completedBlocks = focusBlocks.filter(b => b.status === 'completed' || b.status === 'scheduled');
     const skippedBlocks = focusBlocks.filter(b => b.status === 'skipped');
     
     const totalFocusedMinutes = completedBlocks.reduce((sum, block) => {
-      return sum + (block.end.getTime() - block.start.getTime()) / 60000;
+      return sum + (new Date(block.end).getTime() - new Date(block.start).getTime()) / 60000;
     }, 0);
 
     // Goal breakdown
     const goalBreakdown: Record<string, { name: string; minutes: number }> = {};
     for (const block of completedBlocks) {
       const goalId = block.goalId;
-      if (!goalBreakdown[goalId]) {
-        goalBreakdown[goalId] = { name: block.goal.name, minutes: 0 };
+      const goal = goalsById.get(goalId) as any;
+      if (!goal) {
+        continue;
       }
-      goalBreakdown[goalId].minutes += (block.end.getTime() - block.start.getTime()) / 60000;
+      if (!goalBreakdown[goalId]) {
+        goalBreakdown[goalId] = { name: goal.name, minutes: 0 };
+      }
+      goalBreakdown[goalId].minutes += (new Date(block.end).getTime() - new Date(block.start).getTime()) / 60000;
     }
 
     // Reschedule logs
-    const rescheduleLogs = await prisma.rescheduleLog.findMany({
-      where: {
-        userId: req.userId!,
-        timestamp: { gte: startOfMonth, lte: endOfMonth },
-      },
-    });
+    const rescheduleSnapshot = await firestore.collection('rescheduleLogs')
+      .where('userId', '==', req.userId!)
+      .where('timestamp', '>=', startIso)
+      .where('timestamp', '<=', endIso)
+      .get();
+    const rescheduleLogs = rescheduleSnapshot.docs.map(docSnap => docSnap.data()) as any[];
 
     const rescheduleCount = rescheduleLogs.length;
     const recoveredMinutes = rescheduleLogs.reduce((sum, log) => sum + log.minutesRecovered, 0);
@@ -88,30 +98,39 @@ router.get('/wrapped', requireAuth, async (req: AuthenticatedRequest, res: Respo
     endOfMonth.setHours(23, 59, 59, 999);
 
     // Focus blocks
-    const focusBlocks = await prisma.focusBlock.findMany({
-      where: {
-        userId: req.userId!,
-        start: { gte: startOfMonth },
-        end: { lte: endOfMonth },
-      },
-      include: { goal: true },
-    });
+    const startIso = startOfMonth.toISOString();
+    const endIso = endOfMonth.toISOString();
+    const focusSnapshot = await firestore.collection('focusBlocks')
+      .where('userId', '==', req.userId!)
+      .where('start', '>=', startIso)
+      .where('end', '<=', endIso)
+      .get();
+    const focusBlocks = focusSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() })) as any[];
+
+    const goalSnapshot = await firestore.collection('goals')
+      .where('userId', '==', req.userId!)
+      .get();
+    const goalsById = new Map(goalSnapshot.docs.map(docSnap => [docSnap.id, docSnap.data()]));
 
     const completedBlocks = focusBlocks.filter(b => b.status === 'completed' || b.status === 'scheduled');
     const skippedBlocks = focusBlocks.filter(b => b.status === 'skipped');
 
     const totalFocusedMinutes = completedBlocks.reduce((sum, block) => {
-      return sum + (block.end.getTime() - block.start.getTime()) / 60000;
+      return sum + (new Date(block.end).getTime() - new Date(block.start).getTime()) / 60000;
     }, 0);
 
     // Goal breakdown
     const goalBreakdown: Record<string, { name: string; minutes: number }> = {};
     for (const block of completedBlocks) {
       const goalId = block.goalId;
-      if (!goalBreakdown[goalId]) {
-        goalBreakdown[goalId] = { name: block.goal.name, minutes: 0 };
+      const goal = goalsById.get(goalId) as any;
+      if (!goal) {
+        continue;
       }
-      goalBreakdown[goalId].minutes += (block.end.getTime() - block.start.getTime()) / 60000;
+      if (!goalBreakdown[goalId]) {
+        goalBreakdown[goalId] = { name: goal.name, minutes: 0 };
+      }
+      goalBreakdown[goalId].minutes += (new Date(block.end).getTime() - new Date(block.start).getTime()) / 60000;
     }
 
     // Find peak productivity day and hour
@@ -119,8 +138,9 @@ router.get('/wrapped', requireAuth, async (req: AuthenticatedRequest, res: Respo
     const hourCount: Record<number, number> = {};
     
     for (const block of completedBlocks) {
-      const day = block.start.toLocaleDateString('en-US', { weekday: 'long' });
-      const hour = block.start.getHours();
+      const startDate = new Date(block.start);
+      const day = startDate.toLocaleDateString('en-US', { weekday: 'long' });
+      const hour = startDate.getHours();
       
       dayCount[day] = (dayCount[day] || 0) + 1;
       hourCount[hour] = (hourCount[hour] || 0) + 1;
@@ -131,12 +151,12 @@ router.get('/wrapped', requireAuth, async (req: AuthenticatedRequest, res: Respo
     const peakHourFormatted = `${parseInt(peakHour) > 12 ? parseInt(peakHour) - 12 : parseInt(peakHour)}:00 ${parseInt(peakHour) >= 12 ? 'PM' : 'AM'}`;
 
     // Reschedule logs
-    const rescheduleLogs = await prisma.rescheduleLog.findMany({
-      where: {
-        userId: req.userId!,
-        timestamp: { gte: startOfMonth, lte: endOfMonth },
-      },
-    });
+    const rescheduleSnapshot = await firestore.collection('rescheduleLogs')
+      .where('userId', '==', req.userId!)
+      .where('timestamp', '>=', startIso)
+      .where('timestamp', '<=', endIso)
+      .get();
+    const rescheduleLogs = rescheduleSnapshot.docs.map(docSnap => docSnap.data()) as any[];
 
     const rescheduleCount = rescheduleLogs.length;
     const recoveredMinutes = rescheduleLogs.reduce((sum, log) => sum + log.minutesRecovered, 0);

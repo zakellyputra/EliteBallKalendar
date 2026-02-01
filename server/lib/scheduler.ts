@@ -1,5 +1,5 @@
 import { CalendarEvent, listEvents, createEvent, getWeekRange } from './google-calendar';
-import { prisma } from '../index';
+import { firestore } from './firebase-admin';
 
 export interface ProposedBlock {
   goalId: string;
@@ -115,27 +115,27 @@ export async function generateSchedule(
   weekEnd?: Date
 ): Promise<ScheduleResult> {
   // Fetch user's goals
-  const goals = await prisma.goal.findMany({
-    where: { userId },
-    orderBy: { targetMinutesPerWeek: 'desc' }, // Prioritize larger goals
-  });
+  const goalsSnapshot = await firestore.collection('goals')
+    .where('userId', '==', userId)
+    .orderBy('targetMinutesPerWeek', 'desc')
+    .get();
+  const goals = goalsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() })) as any[];
 
   if (goals.length === 0) {
     return { proposedBlocks: [], availableMinutes: 0, requestedMinutes: 0 };
   }
 
   // Fetch user's settings
-  const settings = await prisma.settings.findUnique({
-    where: { userId },
-  });
+  const settingsDoc = await firestore.collection('settings').doc(userId).get();
+  const settings = settingsDoc.exists ? settingsDoc.data() : null;
 
   if (!settings) {
     throw new Error('Settings not found. Please configure your working hours first.');
   }
 
-  const workingWindow = JSON.parse(settings.workingWindow) as Record<string, WorkingWindowDay>;
-  const blockLengthMinutes = settings.blockLengthMinutes;
-  const minGapMinutes = settings.minGapMinutes;
+  const workingWindow = settings.workingWindow as Record<string, WorkingWindowDay>;
+  const blockLengthMinutes = settings.blockLengthMinutes as number;
+  const minGapMinutes = settings.minGapMinutes as number;
 
   // Fetch calendar events for the week (use provided dates or default to current week)
   const { start: defaultStart, end: defaultEnd } = getWeekRange();
@@ -264,19 +264,18 @@ export async function applySchedule(
     });
 
     // Create FocusBlock in database
-    const focusBlock = await prisma.focusBlock.create({
-      data: {
-        userId,
-        goalId: block.goalId,
-        start: new Date(block.start),
-        end: new Date(block.end),
-        calendarEventId: calendarEvent.id,
-        status: 'scheduled',
-      },
+    const focusBlockRef = await firestore.collection('focusBlocks').add({
+      userId,
+      goalId: block.goalId,
+      start: block.start,
+      end: block.end,
+      calendarEventId: calendarEvent.id,
+      status: 'scheduled',
+      createdAt: new Date().toISOString(),
     });
 
     appliedBlocks.push({
-      id: focusBlock.id,
+      id: focusBlockRef.id,
       calendarEventId: calendarEvent.id,
       goalId: block.goalId,
       start: block.start,

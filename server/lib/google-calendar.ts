@@ -1,6 +1,6 @@
 import { google, calendar_v3 } from 'googleapis';
 import { getOAuth2Client, refreshAccessToken } from './auth';
-import { prisma } from '../index';
+import { firestore } from './firebase-admin';
 
 export interface CalendarInfo {
   id: string;
@@ -61,36 +61,35 @@ export interface CreateEventInput {
 }
 
 async function getCalendarClient(userId: string): Promise<calendar_v3.Calendar> {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-  });
+  const userDoc = await firestore.collection('users').doc(userId).get();
+  const user = userDoc.data();
 
-  if (!user || !user.accessToken) {
-    throw new Error('User not authenticated');
+  if (!user || !user.calendarAccessToken) {
+    throw new Error('Calendar not connected');
   }
 
   const oauth2Client = getOAuth2Client();
   
+  const tokenExpiry = user.calendarTokenExpiry ? new Date(user.calendarTokenExpiry) : null;
+  const isExpired = !tokenExpiry || new Date() >= tokenExpiry;
+
   // Check if token is expired
-  if (user.tokenExpiry && new Date() >= user.tokenExpiry) {
-    if (!user.refreshToken) {
+  if (isExpired) {
+    if (!user.calendarRefreshToken) {
       throw new Error('Refresh token not available');
     }
     
-    const { accessToken, expiry } = await refreshAccessToken(user.refreshToken);
+    const { accessToken, expiry } = await refreshAccessToken(user.calendarRefreshToken);
     
     // Update user with new access token
-    await prisma.user.update({
-      where: { id: userId },
-      data: {
-        accessToken,
-        tokenExpiry: expiry,
-      },
-    });
+    await firestore.collection('users').doc(userId).set({
+      calendarAccessToken: accessToken,
+      calendarTokenExpiry: expiry.toISOString(),
+    }, { merge: true });
     
     oauth2Client.setCredentials({ access_token: accessToken });
   } else {
-    oauth2Client.setCredentials({ access_token: user.accessToken });
+    oauth2Client.setCredentials({ access_token: user.calendarAccessToken });
   }
 
   return google.calendar({ version: 'v3', auth: oauth2Client });

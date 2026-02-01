@@ -1,9 +1,9 @@
 import { Router, Response } from 'express';
-import { prisma } from '../index';
 import { requireAuth, AuthenticatedRequest } from '../middleware/auth';
 import { compressContext } from '../lib/bear1';
 import { generateReschedule, RescheduleOperation } from '../lib/gemini';
 import { listEvents, getWeekRange, updateEvent, deleteEvent, createEvent } from '../lib/google-calendar';
+import { firestore } from '../lib/firebase-admin';
 
 const router = Router();
 
@@ -15,24 +15,26 @@ async function buildContext(userId: string): Promise<string> {
   const events = await listEvents(userId, start, end);
   
   // Fetch focus blocks
-  const focusBlocks = await prisma.focusBlock.findMany({
-    where: {
-      userId,
-      start: { gte: start },
-      end: { lte: end },
-    },
-    include: { goal: true },
-  });
+  const startIso = start.toISOString();
+  const endIso = end.toISOString();
+  const focusSnapshot = await firestore.collection('focusBlocks')
+    .where('userId', '==', userId)
+    .where('start', '>=', startIso)
+    .where('end', '<=', endIso)
+    .get();
+  const focusBlocks = focusSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() })) as any[];
+
+  const goalsSnapshot = await firestore.collection('goals')
+    .where('userId', '==', userId)
+    .get();
+  const goalsById = new Map(goalsSnapshot.docs.map(docSnap => [docSnap.id, docSnap.data()]));
 
   // Fetch settings
-  const settings = await prisma.settings.findUnique({
-    where: { userId },
-  });
+  const settingsDoc = await firestore.collection('settings').doc(userId).get();
+  const settings = settingsDoc.exists ? settingsDoc.data() : null;
 
   // Fetch goals
-  const goals = await prisma.goal.findMany({
-    where: { userId },
-  });
+  const goals = goalsSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() })) as any[];
 
   // Build context string
   let context = `Current date/time: ${new Date().toISOString()}\n\n`;
@@ -46,12 +48,14 @@ async function buildContext(userId: string): Promise<string> {
   if (settings) {
     context += `Block length: ${settings.blockLengthMinutes} minutes\n`;
     context += `Timezone: ${settings.timezone}\n`;
-    context += `Working window: ${settings.workingWindow}\n`;
+    context += `Working window: ${JSON.stringify(settings.workingWindow)}\n`;
   }
   
   context += `\n=== FOCUS BLOCKS (this week) ===\n`;
   for (const block of focusBlocks) {
-    context += `- [${block.id}] ${block.goal.name}: ${block.start.toISOString()} to ${block.end.toISOString()} (status: ${block.status})\n`;
+    const goal = goalsById.get(block.goalId) as any;
+    const goalName = goal?.name || 'Unknown';
+    context += `- [${block.id}] ${goalName}: ${block.start} to ${block.end} (status: ${block.status})\n`;
   }
   
   context += `\n=== OTHER CALENDAR EVENTS (this week) ===\n`;
@@ -111,13 +115,13 @@ router.post('/apply', requireAuth, async (req: AuthenticatedRequest, res: Respon
         case 'move':
           if (op.blockId && op.to) {
             // Find the focus block
-            const block = await prisma.focusBlock.findFirst({
-              where: { id: op.blockId, userId: req.userId! },
-            });
+            const blockRef = firestore.collection('focusBlocks').doc(op.blockId);
+            const blockSnap = await blockRef.get();
+            const block = blockSnap.exists ? blockSnap.data() : null;
             
-            if (block && block.calendarEventId) {
+            if (block && block.userId === req.userId! && block.calendarEventId) {
               // Calculate duration
-              const duration = block.end.getTime() - block.start.getTime();
+              const duration = new Date(block.end).getTime() - new Date(block.start).getTime();
               const newStart = new Date(op.to);
               const newEnd = new Date(newStart.getTime() + duration);
               
@@ -128,14 +132,11 @@ router.post('/apply', requireAuth, async (req: AuthenticatedRequest, res: Respon
               });
               
               // Update database
-              await prisma.focusBlock.update({
-                where: { id: op.blockId },
-                data: {
-                  start: newStart,
-                  end: newEnd,
-                  status: 'moved',
-                },
-              });
+              await blockRef.set({
+                start: newStart.toISOString(),
+                end: newEnd.toISOString(),
+                status: 'moved',
+              }, { merge: true });
               
               blocksMovedCount++;
               minutesRecovered += duration / 60000;
@@ -146,9 +147,12 @@ router.post('/apply', requireAuth, async (req: AuthenticatedRequest, res: Respon
         case 'create':
           if (op.goalName && op.start && op.end) {
             // Find the goal
-            const goal = await prisma.goal.findFirst({
-              where: { userId: req.userId!, name: op.goalName },
-            });
+            const goalSnapshot = await firestore.collection('goals')
+              .where('userId', '==', req.userId!)
+              .where('name', '==', op.goalName)
+              .get();
+            const goalDoc = goalSnapshot.docs[0];
+            const goal = goalDoc ? ({ id: goalDoc.id, ...goalDoc.data() } as any) : null;
             
             if (goal) {
               // Create calendar event
@@ -160,15 +164,14 @@ router.post('/apply', requireAuth, async (req: AuthenticatedRequest, res: Respon
               });
               
               // Create focus block in database
-              await prisma.focusBlock.create({
-                data: {
-                  userId: req.userId!,
-                  goalId: goal.id,
-                  start: new Date(op.start),
-                  end: new Date(op.end),
-                  calendarEventId: calendarEvent.id,
-                  status: 'scheduled',
-                },
+              await firestore.collection('focusBlocks').add({
+                userId: req.userId!,
+                goalId: goal.id,
+                start: op.start,
+                end: op.end,
+                calendarEventId: calendarEvent.id,
+                status: 'scheduled',
+                createdAt: new Date().toISOString(),
               });
               
               const duration = (new Date(op.end).getTime() - new Date(op.start).getTime()) / 60000;
@@ -179,19 +182,16 @@ router.post('/apply', requireAuth, async (req: AuthenticatedRequest, res: Respon
 
         case 'delete':
           if (op.blockId) {
-            const block = await prisma.focusBlock.findFirst({
-              where: { id: op.blockId, userId: req.userId! },
-            });
+            const blockRef = firestore.collection('focusBlocks').doc(op.blockId);
+            const blockSnap = await blockRef.get();
+            const block = blockSnap.exists ? blockSnap.data() : null;
             
-            if (block && block.calendarEventId) {
+            if (block && block.userId === req.userId! && block.calendarEventId) {
               // Delete calendar event
               await deleteEvent(req.userId!, block.calendarEventId);
               
               // Update database (mark as skipped instead of deleting)
-              await prisma.focusBlock.update({
-                where: { id: op.blockId },
-                data: { status: 'skipped' },
-              });
+              await blockRef.set({ status: 'skipped' }, { merge: true });
               
               blocksMovedCount++;
             }
@@ -202,15 +202,14 @@ router.post('/apply', requireAuth, async (req: AuthenticatedRequest, res: Respon
 
     // Log the reschedule
     const rawContext = await buildContext(req.userId!);
-    await prisma.rescheduleLog.create({
-      data: {
-        userId: req.userId!,
-        reason: reason || 'AI reschedule',
-        blocksMovedCount,
-        minutesRecovered: Math.round(minutesRecovered),
-        rawContextChars: rawContext.length,
-        compressedChars: rawContext.length, // Will be updated if Bear1 was used
-      },
+    await firestore.collection('rescheduleLogs').add({
+      userId: req.userId!,
+      reason: reason || 'AI reschedule',
+      blocksMovedCount,
+      minutesRecovered: Math.round(minutesRecovered),
+      rawContextChars: rawContext.length,
+      compressedChars: rawContext.length,
+      timestamp: new Date().toISOString(),
     });
 
     res.json({

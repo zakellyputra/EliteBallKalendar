@@ -1,16 +1,21 @@
 import { Router, Response } from 'express';
-import { prisma } from '../index';
 import { requireAuth, AuthenticatedRequest } from '../middleware/auth';
+import { firestore } from '../lib/firebase-admin';
 
 const router = Router();
 
 // Get all goals for the current user
 router.get('/', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const goals = await prisma.goal.findMany({
-      where: { userId: req.userId! },
-      orderBy: { createdAt: 'desc' },
-    });
+    const snapshot = await firestore.collection('goals')
+      .where('userId', '==', req.userId!)
+      .orderBy('createdAt', 'desc')
+      .get();
+
+    const goals = snapshot.docs.map(docSnap => ({
+      id: docSnap.id,
+      ...docSnap.data(),
+    }));
 
     res.json({ goals });
   } catch (err: any) {
@@ -28,15 +33,15 @@ router.post('/', requireAuth, async (req: AuthenticatedRequest, res: Response) =
       return res.status(400).json({ error: 'Name and targetMinutesPerWeek are required' });
     }
 
-    const goal = await prisma.goal.create({
-      data: {
-        userId: req.userId!,
-        name,
-        targetMinutesPerWeek: parseInt(targetMinutesPerWeek),
-      },
+    const docRef = await firestore.collection('goals').add({
+      userId: req.userId!,
+      name,
+      targetMinutesPerWeek: parseInt(targetMinutesPerWeek),
+      createdAt: new Date().toISOString(),
     });
 
-    res.json({ goal });
+    const docSnap = await docRef.get();
+    res.json({ goal: { id: docSnap.id, ...docSnap.data() } });
   } catch (err: any) {
     console.error('Error creating goal:', err);
     res.status(500).json({ error: err.message || 'Failed to create goal' });
@@ -47,14 +52,15 @@ router.post('/', requireAuth, async (req: AuthenticatedRequest, res: Response) =
 router.put('/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
+    if (Array.isArray(id)) {
+      return res.status(400).json({ error: 'Invalid goal id' });
+    }
     const { name, targetMinutesPerWeek } = req.body;
 
     // Verify ownership
-    const existing = await prisma.goal.findFirst({
-      where: { id, userId: req.userId! },
-    });
-
-    if (!existing) {
+    const docRef = firestore.collection('goals').doc(id);
+    const existing = await docRef.get();
+    if (!existing.exists || existing.data()?.userId !== req.userId!) {
       return res.status(404).json({ error: 'Goal not found' });
     }
 
@@ -64,12 +70,9 @@ router.put('/:id', requireAuth, async (req: AuthenticatedRequest, res: Response)
       updateData.targetMinutesPerWeek = parseInt(targetMinutesPerWeek);
     }
 
-    const goal = await prisma.goal.update({
-      where: { id },
-      data: updateData,
-    });
-
-    res.json({ goal });
+    await docRef.set(updateData, { merge: true });
+    const updated = await docRef.get();
+    res.json({ goal: { id: updated.id, ...updated.data() } });
   } catch (err: any) {
     console.error('Error updating goal:', err);
     res.status(500).json({ error: err.message || 'Failed to update goal' });
@@ -80,19 +83,18 @@ router.put('/:id', requireAuth, async (req: AuthenticatedRequest, res: Response)
 router.delete('/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
+    if (Array.isArray(id)) {
+      return res.status(400).json({ error: 'Invalid goal id' });
+    }
 
     // Verify ownership
-    const existing = await prisma.goal.findFirst({
-      where: { id, userId: req.userId! },
-    });
-
-    if (!existing) {
+    const docRef = firestore.collection('goals').doc(id);
+    const existing = await docRef.get();
+    if (!existing.exists || existing.data()?.userId !== req.userId!) {
       return res.status(404).json({ error: 'Goal not found' });
     }
 
-    await prisma.goal.delete({
-      where: { id },
-    });
+    await docRef.delete();
 
     res.json({ success: true });
   } catch (err: any) {

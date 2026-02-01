@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
-import { prisma } from '../index';
 import { requireAuth, AuthenticatedRequest } from '../middleware/auth';
+import { firestore } from '../lib/firebase-admin';
 
 const router = Router();
 
@@ -18,34 +18,26 @@ const DEFAULT_WORKING_WINDOW: Record<string, { enabled: boolean; start: string; 
 // Get user settings
 router.get('/', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    let settings = await prisma.settings.findUnique({
-      where: { userId: req.userId! },
-    });
+    const settingsRef = firestore.collection('settings').doc(req.userId!);
+    const snapshot = await settingsRef.get();
 
-    // If no settings exist, create defaults
-    if (!settings) {
-      settings = await prisma.settings.create({
-        data: {
-          userId: req.userId!,
-          workingWindow: JSON.stringify(DEFAULT_WORKING_WINDOW),
-          blockLengthMinutes: 30,
-          timezone: 'America/New_York',
-          minGapMinutes: 5,
-          selectedCalendars: null, // null means all calendars
-        },
-      });
+    if (!snapshot.exists) {
+      const defaults = {
+        id: req.userId!,
+        userId: req.userId!,
+        workingWindow: DEFAULT_WORKING_WINDOW,
+        blockLengthMinutes: 30,
+        timezone: 'America/New_York',
+        minGapMinutes: 5,
+        selectedCalendars: null,
+      };
+      await settingsRef.set(defaults);
+      res.json({ settings: defaults });
+      return;
     }
 
-    // Parse JSON fields
-    const parsed = {
-      ...settings,
-      workingWindow: JSON.parse(settings.workingWindow),
-      selectedCalendars: settings.selectedCalendars 
-        ? JSON.parse(settings.selectedCalendars) 
-        : null,
-    };
-
-    res.json({ settings: parsed });
+    const settings = snapshot.data();
+    res.json({ settings: { id: snapshot.id, ...settings } });
   } catch (err: any) {
     console.error('Error fetching settings:', err);
     res.status(500).json({ error: err.message || 'Failed to fetch settings' });
@@ -60,7 +52,7 @@ router.put('/', requireAuth, async (req: AuthenticatedRequest, res: Response) =>
     const updateData: any = {};
     
     if (workingWindow !== undefined) {
-      updateData.workingWindow = JSON.stringify(workingWindow);
+      updateData.workingWindow = workingWindow;
     }
     if (blockLengthMinutes !== undefined) {
       updateData.blockLengthMinutes = blockLengthMinutes;
@@ -72,35 +64,17 @@ router.put('/', requireAuth, async (req: AuthenticatedRequest, res: Response) =>
       updateData.minGapMinutes = minGapMinutes;
     }
     if (selectedCalendars !== undefined) {
-      // null means all calendars, array means specific selection
-      updateData.selectedCalendars = selectedCalendars === null 
-        ? null 
-        : JSON.stringify(selectedCalendars);
+      updateData.selectedCalendars = selectedCalendars;
     }
 
-    // Upsert settings
-    const settings = await prisma.settings.upsert({
-      where: { userId: req.userId! },
-      update: updateData,
-      create: {
-        userId: req.userId!,
-        workingWindow: updateData.workingWindow || JSON.stringify(DEFAULT_WORKING_WINDOW),
-        blockLengthMinutes: updateData.blockLengthMinutes || 30,
-        timezone: updateData.timezone || 'America/New_York',
-        minGapMinutes: updateData.minGapMinutes || 5,
-        selectedCalendars: updateData.selectedCalendars || null,
-      },
-    });
+    const settingsRef = firestore.collection('settings').doc(req.userId!);
+    await settingsRef.set({
+      userId: req.userId!,
+      ...updateData,
+    }, { merge: true });
 
-    const parsed = {
-      ...settings,
-      workingWindow: JSON.parse(settings.workingWindow),
-      selectedCalendars: settings.selectedCalendars 
-        ? JSON.parse(settings.selectedCalendars) 
-        : null,
-    };
-
-    res.json({ settings: parsed });
+    const updated = await settingsRef.get();
+    res.json({ settings: { id: updated.id, ...updated.data() } });
   } catch (err: any) {
     console.error('Error updating settings:', err);
     res.status(500).json({ error: err.message || 'Failed to update settings' });

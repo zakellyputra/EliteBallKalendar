@@ -12,7 +12,7 @@ import { Settings as SettingsIcon, Calendar, Bell, Database, Loader2, RefreshCw 
 import { toast } from 'sonner';
 import { useSettings } from '../hooks/useSettings';
 import { useAuthContext } from '../components/AuthProvider';
-import { WorkingWindow, CalendarInfo, calendar as calendarApi } from '../lib/api';
+import { WorkingWindow, CalendarInfo, calendar as calendarApi, auth as authApi } from '../lib/api';
 
 const DAYS_OF_WEEK = [
   { key: 'monday', label: 'Monday' },
@@ -38,6 +38,7 @@ export function Settings() {
   const [availableCalendars, setAvailableCalendars] = useState<CalendarInfo[]>([]);
   const [selectedCalendars, setSelectedCalendars] = useState<string[] | null>(null);
   const [calendarsLoading, setCalendarsLoading] = useState(false);
+  const [connectingCalendar, setConnectingCalendar] = useState(false);
 
   // Fetch available calendars when authenticated
   useEffect(() => {
@@ -51,8 +52,29 @@ export function Settings() {
     const result = await calendarApi.listCalendars();
     if (result.data?.calendars) {
       setAvailableCalendars(result.data.calendars);
+    } else if (result.error) {
+      if (result.error === 'Calendar not connected') {
+        toast.error('Connect Google Calendar to load calendars.');
+      } else {
+        toast.error(result.error);
+      }
     }
     setCalendarsLoading(false);
+  };
+
+  const handleConnectCalendar = async () => {
+    if (!isAuthenticated) {
+      toast.error('Please sign in first');
+      return;
+    }
+    setConnectingCalendar(true);
+    const result = await authApi.startCalendarConnect();
+    setConnectingCalendar(false);
+    if (result.error || !result.data?.url) {
+      toast.error(result.error || 'Failed to start calendar connection');
+      return;
+    }
+    window.location.href = result.data.url;
   };
 
   // Sync state when settings load
@@ -197,6 +219,13 @@ export function Settings() {
                     <div className={`h-2 w-2 rounded-full ${isAuthenticated ? 'bg-green-500' : 'bg-yellow-500'}`} />
                   </div>
                 </div>
+                <Button
+                  variant="outline"
+                  onClick={handleConnectCalendar}
+                  disabled={!isAuthenticated || connectingCalendar}
+                >
+                  {connectingCalendar ? 'Connecting...' : 'Connect Google Calendar'}
+                </Button>
 
                 <div className="space-y-2">
                   <Label htmlFor="timezone">Timezone</Label>

@@ -1,30 +1,60 @@
 import { Router, Response } from 'express';
-import { prisma } from '../index';
-import { getAuthUrl, getTokensFromCode, getUserInfo, generateSessionToken } from '../lib/auth';
-import { setSession, deleteSession, getSession, AuthenticatedRequest, requireAuth } from '../middleware/auth';
+import crypto from 'crypto';
+import { getAuthUrl, getTokensFromCode } from '../lib/auth';
+import { AuthenticatedRequest, requireAuth } from '../middleware/auth';
+import { firestore } from '../lib/firebase-admin';
 
 const router = Router();
 
-// Initiate Google OAuth
-router.get('/google', (req, res) => {
-  const authUrl = getAuthUrl();
-  res.redirect(authUrl);
+// Initiate Google Calendar OAuth for connected calendar
+router.post('/google/start', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.userId!;
+    const nonce = crypto.randomBytes(16).toString('hex');
+    const state = Buffer.from(JSON.stringify({ userId, nonce })).toString('base64url');
+
+    await firestore.collection('users').doc(userId).set({
+      calendarConnectNonce: nonce,
+      calendarConnectRequestedAt: new Date().toISOString(),
+    }, { merge: true });
+
+    const authUrl = getAuthUrl(state);
+    res.json({ url: authUrl });
+  } catch (err: any) {
+    console.error('Error starting calendar OAuth:', err);
+    res.status(500).json({ error: err.message || 'Failed to start calendar OAuth' });
+  }
 });
 
-// Google OAuth callback
+// Google OAuth callback for calendar connect
 router.get('/google/callback', async (req, res) => {
-  const { code, error } = req.query;
+  const { code, error, state } = req.query;
 
   if (error) {
     console.error('OAuth error:', error);
     return res.redirect('/?error=oauth_error');
   }
 
-  if (!code || typeof code !== 'string') {
+  if (!code || typeof code !== 'string' || !state || typeof state !== 'string') {
     return res.redirect('/?error=missing_code');
   }
 
   try {
+    const decodedState = JSON.parse(Buffer.from(state, 'base64url').toString('utf-8')) as {
+      userId: string;
+      nonce: string;
+    };
+
+    if (!decodedState?.userId || !decodedState?.nonce) {
+      throw new Error('Invalid OAuth state');
+    }
+
+    const userDoc = await firestore.collection('users').doc(decodedState.userId).get();
+    const userData = userDoc.data();
+    if (!userData || userData.calendarConnectNonce !== decodedState.nonce) {
+      throw new Error('OAuth state mismatch');
+    }
+
     // Exchange code for tokens
     const tokens = await getTokensFromCode(code);
     
@@ -32,87 +62,19 @@ router.get('/google/callback', async (req, res) => {
       throw new Error('No access token received');
     }
 
-    // Get user info
-    const userInfo = await getUserInfo(tokens.access_token);
-    
-    // Upsert user in database
-    const user = await prisma.user.upsert({
-      where: { email: userInfo.email },
-      update: {
-        name: userInfo.name,
-        image: userInfo.picture,
-        accessToken: tokens.access_token,
-        refreshToken: tokens.refresh_token || undefined,
-        tokenExpiry: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
-      },
-      create: {
-        email: userInfo.email,
-        name: userInfo.name,
-        image: userInfo.picture,
-        accessToken: tokens.access_token,
-        refreshToken: tokens.refresh_token || undefined,
-        tokenExpiry: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
-      },
-    });
+    await firestore.collection('users').doc(decodedState.userId).set({
+      calendarAccessToken: tokens.access_token,
+      calendarRefreshToken: tokens.refresh_token || null,
+      calendarTokenExpiry: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : null,
+      calendarConnectedAt: new Date().toISOString(),
+      calendarConnectNonce: null,
+    }, { merge: true });
 
-    // Create session
-    const sessionToken = generateSessionToken();
-    setSession(sessionToken, user.id);
-
-    // Set session cookie
-    res.cookie('session', sessionToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-    });
-
-    // Redirect to app
-    res.redirect('/');
+    res.redirect('http://localhost:3000/?calendar=connected');
   } catch (err) {
     console.error('OAuth callback error:', err);
     res.redirect('/?error=auth_failed');
   }
-});
-
-// Get current user
-router.get('/me', async (req: AuthenticatedRequest, res: Response) => {
-  const sessionToken = req.cookies?.session;
-  
-  if (!sessionToken) {
-    return res.json({ user: null });
-  }
-
-  const userId = getSession(sessionToken);
-  
-  if (!userId) {
-    return res.json({ user: null });
-  }
-
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: {
-      id: true,
-      email: true,
-      name: true,
-      image: true,
-      createdAt: true,
-    },
-  });
-
-  res.json({ user });
-});
-
-// Logout
-router.post('/logout', (req: AuthenticatedRequest, res: Response) => {
-  const sessionToken = req.cookies?.session;
-  
-  if (sessionToken) {
-    deleteSession(sessionToken);
-  }
-
-  res.clearCookie('session');
-  res.json({ success: true });
 });
 
 export default router;

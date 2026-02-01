@@ -61,6 +61,7 @@ export function Dashboard() {
   
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
   const [eventsLoading, setEventsLoading] = useState(false);
+  const [calendarError, setCalendarError] = useState<string | null>(null);
   const [showAddGoal, setShowAddGoal] = useState(false);
   const [newGoal, setNewGoal] = useState({ name: '', hours: '' });
   const [saving, setSaving] = useState(false);
@@ -68,6 +69,9 @@ export function Dashboard() {
   
   // Client-side cache for week events
   const weekCacheRef = useRef<Map<string, CalendarEvent[]>>(new Map());
+  const pendingCalendarRefreshRef = useRef(false);
+  const prevAuthRef = useRef<boolean>(false);
+  const calendarRetryRef = useRef(0);
 
   // Redirect to onboarding if not completed
   useEffect(() => {
@@ -106,7 +110,18 @@ export function Dashboard() {
     if (result.data?.events) {
       // Store in cache
       weekCacheRef.current.set(cacheKey, result.data.events);
+      calendarRetryRef.current = 0;
       return result.data.events;
+    }
+
+    if (result.error) {
+      setCalendarError(result.error);
+      if (calendarRetryRef.current < 1) {
+        calendarRetryRef.current += 1;
+        setTimeout(() => {
+          fetchCalendarEvents(true);
+        }, 1000);
+      }
     }
     
     return [];
@@ -130,10 +145,46 @@ export function Dashboard() {
 
   // Fetch calendar events when authenticated or week changes
   useEffect(() => {
-    if (isAuthenticated) {
+    if (!authLoading && isAuthenticated) {
       fetchCalendarEvents();
     }
-  }, [isAuthenticated, weekOffset]);
+  }, [authLoading, isAuthenticated, weekOffset]);
+
+  useEffect(() => {
+    if (prevAuthRef.current !== isAuthenticated) {
+      if (isAuthenticated) {
+        weekCacheRef.current.clear();
+        fetchCalendarEvents(true);
+        if (pendingCalendarRefreshRef.current) {
+          pendingCalendarRefreshRef.current = false;
+        }
+      }
+      prevAuthRef.current = isAuthenticated;
+    }
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('calendar') === 'connected') {
+      pendingCalendarRefreshRef.current = true;
+      if (isAuthenticated) {
+        weekCacheRef.current.clear();
+        fetchCalendarEvents(true);
+        pendingCalendarRefreshRef.current = false;
+      }
+      params.delete('calendar');
+      const nextUrl = params.toString() ? `${window.location.pathname}?${params}` : window.location.pathname;
+      window.history.replaceState({}, '', nextUrl);
+    }
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    if (calendarError === 'Calendar not connected') {
+      toast.error('Connect Google Calendar in Settings to load events.');
+    } else if (calendarError) {
+      toast.error(calendarError);
+    }
+  }, [calendarError]);
 
   const fetchCalendarEvents = async (forceRefresh = false) => {
     const cacheKey = getWeekCacheKey(weekOffset);
@@ -147,6 +198,7 @@ export function Dashboard() {
     }
     
     setEventsLoading(true);
+    setCalendarError(null);
     const events = await fetchWeekEvents(weekOffset, forceRefresh);
     setCalendarEvents(events);
     setEventsLoading(false);

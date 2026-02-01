@@ -1,5 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
-import { settings as settingsApi, Settings, UpdateSettingsInput, WorkingWindow } from '../lib/api';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { Settings, UpdateSettingsInput, WorkingWindow } from '../lib/api';
+import { db } from '../lib/firebase';
+import { useAuthContext } from '../components/AuthProvider';
 
 const DEFAULT_WORKING_WINDOW: WorkingWindow = {
   monday: { enabled: true, start: '09:00', end: '17:00' },
@@ -18,6 +21,7 @@ interface SettingsState {
 }
 
 export function useSettings() {
+  const { user } = useAuthContext();
   const [state, setState] = useState<SettingsState>({
     settings: null,
     loading: true,
@@ -25,42 +29,81 @@ export function useSettings() {
   });
 
   const fetchSettings = useCallback(async () => {
-    setState(prev => ({ ...prev, loading: true, error: null }));
-    
-    const result = await settingsApi.get();
-    
-    if (result.error) {
-      setState({ settings: null, loading: false, error: result.error });
-    } else {
-      setState({ 
-        settings: result.data?.settings || null, 
-        loading: false, 
-        error: null 
-      });
+    if (!user) {
+      setState({ settings: null, loading: false, error: null });
+      return;
     }
-  }, []);
+    setState(prev => ({ ...prev, loading: true, error: null }));
+    try {
+      const settingsRef = doc(db, 'settings', user.id);
+      const snapshot = await getDoc(settingsRef);
+      if (!snapshot.exists()) {
+        const defaults: Settings = {
+          id: user.id,
+          userId: user.id,
+          workingWindow: DEFAULT_WORKING_WINDOW,
+          blockLengthMinutes: 30,
+          timezone: 'America/New_York',
+          minGapMinutes: 5,
+          selectedCalendars: null,
+        };
+        await setDoc(settingsRef, defaults);
+        setState({ settings: defaults, loading: false, error: null });
+        return;
+      }
+
+      const data = snapshot.data() as Settings;
+      setState({
+        settings: {
+          ...data,
+          id: snapshot.id,
+          userId: data.userId || user.id,
+          workingWindow: data.workingWindow || DEFAULT_WORKING_WINDOW,
+          blockLengthMinutes: data.blockLengthMinutes ?? 30,
+          timezone: data.timezone || 'America/New_York',
+          minGapMinutes: data.minGapMinutes ?? 5,
+          selectedCalendars: data.selectedCalendars ?? null,
+        },
+        loading: false,
+        error: null,
+      });
+    } catch (err: any) {
+      setState({ settings: null, loading: false, error: err.message || 'Failed to fetch settings' });
+    }
+  }, [user]);
 
   useEffect(() => {
     fetchSettings();
   }, [fetchSettings]);
 
   const updateSettings = useCallback(async (data: UpdateSettingsInput) => {
+    if (!user) return false;
     setState(prev => ({ ...prev, loading: true, error: null }));
-    
-    const result = await settingsApi.update(data);
-    
-    if (result.error) {
-      setState(prev => ({ ...prev, loading: false, error: result.error! }));
-      return false;
-    } else {
-      setState({ 
-        settings: result.data?.settings || null, 
-        loading: false, 
-        error: null 
-      });
+    try {
+      const settingsRef = doc(db, 'settings', user.id);
+      await setDoc(settingsRef, {
+        ...data,
+        userId: user.id,
+      }, { merge: true });
+      const nextSettings = {
+        ...(state.settings || {
+          id: user.id,
+          userId: user.id,
+          workingWindow: DEFAULT_WORKING_WINDOW,
+          blockLengthMinutes: 30,
+          timezone: 'America/New_York',
+          minGapMinutes: 5,
+          selectedCalendars: null,
+        }),
+        ...data,
+      } as Settings;
+      setState({ settings: nextSettings, loading: false, error: null });
       return true;
+    } catch (err: any) {
+      setState(prev => ({ ...prev, loading: false, error: err.message || 'Failed to update settings' }));
+      return false;
     }
-  }, []);
+  }, [state.settings, user]);
 
   return {
     settings: state.settings,
