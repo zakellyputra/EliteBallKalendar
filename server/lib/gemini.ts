@@ -68,16 +68,33 @@ Rules:
 2. Use ISO 8601 format for all dates (e.g., "2026-01-31T14:00:00.000Z")
 3. CRITICAL: NEVER schedule blocks to dates/times that have already passed. Always check the current date/time in the context and ensure all "to", "start", and "end" fields are in the future.
 4. When moving blocks, ensure the new time doesn't conflict with existing events
-5. If the user wants to move/create blocks OUTSIDE their working window (disabled days or outside hours), DO NOT refuse. Instead:
+5. CRITICAL: RESPECT WORKING WINDOW HOURS - THIS IS MANDATORY. The working window shows which days are enabled and the hours for each day (e.g., "monday": {"enabled": true, "start": "09:00", "end": "17:00"}). 
+   - YOU MUST ALWAYS schedule blocks within the enabled days' start and end times - never schedule outside these bounds
+   - Before outputting any "to", "start", or "end" timestamp, CHECK that the hour and minute fall within the day's working window
+   - If a day is disabled (enabled: false), you can still schedule there but set intent to "confirm_outside_hours"
+   - If scheduling to an enabled day, the start time MUST be >= the day's "start" time and end time MUST be <= the day's "end" time
+   - Example: If Saturday has {"enabled": true, "start": "09:00", "end": "17:00"}, you can ONLY schedule blocks between 9:00 AM (09:00) and 5:00 PM (17:00) on Saturday
+   - Example: If you schedule a block to Saturday at "2026-02-01T18:00:00.000Z" (6 PM), this is WRONG because 18:00 (6 PM) is after 17:00 (5 PM). You MUST use a time like "2026-02-01T14:00:00.000Z" (2 PM) instead.
+   - VALIDATION STEP: Before outputting each operation, verify: (1) Extract the hour from your ISO timestamp, (2) Check the working window for that day, (3) Ensure hour >= start hour and hour <= end hour, (4) If hour equals start/end hour, check minutes too
+   - If the user explicitly requests times outside working hours, set intent to "confirm_outside_hours" but STILL schedule within the working window bounds - do not schedule outside hours
+6. If the user wants to move/create blocks OUTSIDE their working window (disabled days or outside hours), DO NOT refuse. Instead:
    - Set intent to "confirm_outside_hours"
    - Still include the operations the user requested
    - In user_message, note that this is outside their normal working hours and ask if they want to proceed
-6. Keep the user_message concise and friendly (under 100 characters if possible)
-7. If you truly can't fulfill the request (e.g., block doesn't exist, time conflict, or requested date is in the past), explain why in user_message and set operations to empty array
-8. IMPORTANT: Look carefully at the FOCUS BLOCKS section in the context - these are the blocks you can move. Match block IDs exactly.
-9. When providing "from" and "to" fields for move operations, both must be valid ISO 8601 timestamps. The "from" should match the block's current start time, and "to" must be a future date/time.
-10. CRITICAL: If the user asks to reschedule "all blocks", "my blocks", "multiple blocks", or refers to blocks in plural, you MUST include operations for ALL matching blocks in the operations array. Do not stop at just one block - include move operations for every block that matches the user's request.
-11. CRITICAL: If you have many operations, prioritize completing the JSON structure. It's better to return fewer complete operations than many incomplete ones. Always close all brackets and braces properly.`;
+7. Keep the user_message concise and friendly (under 100 characters if possible)
+8. If you truly can't fulfill the request (e.g., block doesn't exist, time conflict, or requested date is in the past), explain why in user_message and set operations to empty array
+9. IMPORTANT: Look carefully at the FOCUS BLOCKS section in the context - these are the blocks you can move. Match block IDs exactly.
+10. When providing "from" and "to" fields for move operations, both must be valid ISO 8601 timestamps. The "from" should match the block's current start time, and "to" must be a future date/time.
+    - IMPORTANT: When setting "to" time, ensure that if you add the block duration to "to", the resulting end time is also within working hours
+    - Example: If block is 30 minutes and working hours end at 17:00 (5 PM), don't schedule "to" at 16:45 (4:45 PM) because it would end at 17:15 (5:15 PM) - schedule it earlier, like 16:30 (4:30 PM) so it ends at 17:00 (5 PM)
+11. CRITICAL: COUNT THE BLOCKS AND INCLUDE ALL OF THEM. If the user asks to reschedule "3 blocks", "all blocks", "my blocks", "multiple blocks", or refers to blocks in plural, you MUST include operations for EVERY SINGLE matching block in the operations array. 
+   - Count how many blocks match the request (e.g., if user says "move my 3 CS340 blocks", count exactly 3 CS340 blocks)
+   - Include a move operation for EACH AND EVERY matching block - do not skip any, do not stop early
+   - If you cannot fit all operations, you MUST still include all of them - the JSON will be handled server-side
+   - NEVER return fewer operations than the number of blocks requested - this is a critical error
+   - Example: If user says "move my 3 focus blocks to Saturday" and there are 3 blocks listed, you MUST return exactly 3 move operations, one for each block ID
+   - Double-check: Before finishing, count your operations and verify you have one operation per matching block
+12. CRITICAL: Always close all brackets and braces properly. Include ALL operations even if the JSON is long - completeness is more important than brevity. Do not truncate the operations array - include every single operation.`;
 
 export async function generateReschedule(
   userMessage: string,
@@ -211,7 +228,7 @@ export async function generateReschedule(
           if (completeOps.length > 0) {
             // Operations are already validated, just parse them (limit to prevent memory issues)
             const validOps: any[] = [];
-            const maxOps = 50; // Limit operations to prevent memory issues
+            const maxOps = 100; // Increased limit to handle more operations (was 50)
             for (let i = 0; i < Math.min(completeOps.length, maxOps); i++) {
               try {
                 const op = JSON.parse(completeOps[i]);
