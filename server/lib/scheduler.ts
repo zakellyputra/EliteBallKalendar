@@ -358,6 +358,21 @@ export async function applySchedule(
   }
 
   for (const block of blocks) {
+    // Check for existing block with same time slot and goal (only active statuses)
+    const existingBlocks = await firestore.collection('focusBlocks')
+      .where('userId', '==', userId)
+      .where('goalId', '==', block.goalId)
+      .where('start', '==', block.start)
+      .where('end', '==', block.end)
+      .where('status', 'in', ['scheduled', 'moved'])
+      .get();
+
+    if (!existingBlocks.empty) {
+      // Skip this block - already exists with active status
+      console.log(`Skipping duplicate block for goal ${block.goalId} at ${block.start}`);
+      continue;
+    }
+
     // Create calendar event in the EBK calendar
     const calendarEvent = await createEvent(userId, {
       title: `Focus Block: ${block.goalName}`,

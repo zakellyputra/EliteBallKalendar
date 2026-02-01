@@ -308,15 +308,21 @@ export function Dashboard() {
       return;
     }
 
+    const blockCount = focusBlocks.length;
     setDeletingBlocks(true);
     try {
       // Delete all focus blocks for the current week
       await Promise.all(focusBlocks.map(block => calendar.deleteEvent(block.id, block.calendarId)));
-      toast.success(`Deleted ${focusBlocks.length} focus block${focusBlocks.length > 1 ? 's' : ''}`);
-      setDeleteDialogOpen(false);
+
+      // Small delay for Google Calendar API eventual consistency
+      await new Promise(resolve => setTimeout(resolve, 500));
+
       // Clear cache for this week and refresh calendar events
       weekCacheRef.current.delete(getWeekCacheKey(weekOffset));
-      fetchCalendarEvents(true);
+      await fetchCalendarEvents(true);
+
+      toast.success(`Deleted ${blockCount} focus block${blockCount > 1 ? 's' : ''}`);
+      setDeleteDialogOpen(false);
     } catch (error) {
       console.error('Error deleting blocks:', error);
       toast.error('Failed to delete some blocks');

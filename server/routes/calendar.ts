@@ -108,6 +108,18 @@ router.delete('/events/:id', requireAuth, async (req: AuthenticatedRequest, res:
     }
     const { calendarId } = req.body || {};
     await deleteEvent(req.userId!, id, calendarId || 'primary');
+
+    // Mark associated focusBlock as deleted
+    const focusBlocksSnapshot = await firestore.collection('focusBlocks')
+      .where('userId', '==', req.userId!)
+      .where('calendarEventId', '==', id)
+      .get();
+
+    const updatePromises = focusBlocksSnapshot.docs.map(doc =>
+      doc.ref.update({ status: 'deleted' })
+    );
+    await Promise.all(updatePromises);
+
     res.json({ success: true });
   } catch (err: any) {
     console.error('Error deleting calendar event:', err);
