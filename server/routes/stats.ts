@@ -4,18 +4,144 @@ import { firestore } from '../lib/firebase-admin';
 
 const router = Router();
 
+// Helper function to get month bounds in UTC for a given timezone
+function getMonthBoundsInUTC(timezone: string): { start: Date; end: Date; monthName: string } {
+  const now = new Date();
+  
+  // Get current date/time components in user's timezone
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+  
+  const parts = formatter.formatToParts(now);
+  const year = parseInt(parts.find(p => p.type === 'year')!.value);
+  const month = parseInt(parts.find(p => p.type === 'month')!.value) - 1; // 0-indexed
+  
+  // Get month name
+  const monthFormatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    month: 'long',
+    year: 'numeric',
+  });
+  const monthName = monthFormatter.format(now);
+  
+  // Find UTC time that displays as day 1, hour 0:00:00 in user's timezone
+  // Use binary search approach: start with a reasonable guess and adjust
+  let startOfMonthUTC = new Date(Date.UTC(year, month, 1, 0, 0, 0, 0));
+  let iterations = 0;
+  const maxIterations = 10;
+  
+  while (iterations < maxIterations) {
+    const startParts = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).formatToParts(startOfMonthUTC);
+    
+    const localDay = parseInt(startParts.find(p => p.type === 'day')!.value);
+    const localHour = parseInt(startParts.find(p => p.type === 'hour')!.value);
+    const localMonth = parseInt(startParts.find(p => p.type === 'month')!.value) - 1;
+    
+    if (localMonth === month && localDay === 1 && localHour === 0) {
+      break; // Found it!
+    }
+    
+    // Adjust: if day/month is wrong, adjust by days; if hour is wrong, adjust by hours
+    if (localMonth !== month || localDay !== 1) {
+      const dayDiff = (month === localMonth ? 1 - localDay : (month < localMonth ? -30 : 30));
+      startOfMonthUTC = new Date(startOfMonthUTC.getTime() + dayDiff * 24 * 60 * 60 * 1000);
+    } else {
+      const hourDiff = -localHour;
+      startOfMonthUTC = new Date(startOfMonthUTC.getTime() + hourDiff * 60 * 60 * 1000);
+    }
+    iterations++;
+  }
+  
+  // Find UTC time that displays as last day, hour 23:59:59 in user's timezone
+  const lastDayOfMonth = new Date(year, month + 1, 0).getDate();
+  let endOfMonthUTC = new Date(Date.UTC(year, month + 1, 0, 23, 59, 59, 999));
+  iterations = 0;
+  
+  while (iterations < maxIterations) {
+    const endParts = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).formatToParts(endOfMonthUTC);
+    
+    const localDay = parseInt(endParts.find(p => p.type === 'day')!.value);
+    const localHour = parseInt(endParts.find(p => p.type === 'hour')!.value);
+    const localMonth = parseInt(endParts.find(p => p.type === 'month')!.value) - 1;
+    
+    if (localMonth === month && localDay === lastDayOfMonth && localHour === 23) {
+      // Set to 23:59:59
+      const localMin = parseInt(endParts.find(p => p.type === 'minute')!.value);
+      if (localMin !== 59) {
+        const minDiff = 59 - localMin;
+        endOfMonthUTC = new Date(endOfMonthUTC.getTime() + minDiff * 60 * 1000);
+      }
+      break;
+    }
+    
+    // Adjust
+    if (localMonth !== month || localDay !== lastDayOfMonth) {
+      const dayDiff = (month === localMonth ? lastDayOfMonth - localDay : (month < localMonth ? -30 : 30));
+      endOfMonthUTC = new Date(endOfMonthUTC.getTime() + dayDiff * 24 * 60 * 60 * 1000);
+    } else {
+      const hourDiff = 23 - localHour;
+      endOfMonthUTC = new Date(endOfMonthUTC.getTime() + hourDiff * 60 * 60 * 1000);
+    }
+    iterations++;
+  }
+  
+  // Ensure end is at 23:59:59.999
+  const finalEndParts = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).formatToParts(endOfMonthUTC);
+  
+  const finalHour = parseInt(finalEndParts.find(p => p.type === 'hour')!.value);
+  const finalMin = parseInt(finalEndParts.find(p => p.type === 'minute')!.value);
+  const finalSec = parseInt(finalEndParts.find(p => p.type === 'second')!.value);
+  
+  if (finalHour !== 23 || finalMin !== 59 || finalSec !== 59) {
+    const hourDiff = 23 - finalHour;
+    const minDiff = 59 - finalMin;
+    const secDiff = 59 - finalSec;
+    endOfMonthUTC = new Date(endOfMonthUTC.getTime() + (hourDiff * 3600 + minDiff * 60 + secDiff) * 1000);
+  }
+  
+  return { start: startOfMonthUTC, end: endOfMonthUTC, monthName };
+}
+
 // Get productivity stats
 router.get('/', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    // Get focus blocks for this month
-    const startOfMonth = new Date();
-    startOfMonth.setDate(1);
-    startOfMonth.setHours(0, 0, 0, 0);
+    // Get user's timezone from settings
+    const settingsDoc = await firestore.collection('settings').doc(req.userId!).get();
+    const settings = settingsDoc.exists ? settingsDoc.data() : null;
+    const userTimezone = (settings?.timezone as string) || 'America/New_York';
     
-    const endOfMonth = new Date();
-    endOfMonth.setMonth(endOfMonth.getMonth() + 1);
-    endOfMonth.setDate(0);
-    endOfMonth.setHours(23, 59, 59, 999);
+    // Get month bounds in UTC for user's timezone
+    const { start: startOfMonth, end: endOfMonth } = getMonthBoundsInUTC(userTimezone);
 
     const startIso = startOfMonth.toISOString();
     const endIso = endOfMonth.toISOString();
@@ -35,7 +161,11 @@ router.get('/', requireAuth, async (req: AuthenticatedRequest, res: Response) =>
     const goalsById = new Map(goalSnapshot.docs.map(docSnap => [docSnap.id, docSnap.data()]));
 
     // Calculate stats
-    const completedBlocks = focusBlocks.filter(b => b.status === 'completed' || b.status === 'scheduled');
+    // Include completed, scheduled, and moved blocks (moved blocks are still valid focus time)
+    const completedBlocks = focusBlocks.filter(b => {
+      const status = b.status;
+      return status === 'completed' || status === 'scheduled' || status === 'moved';
+    });
     const skippedBlocks = focusBlocks.filter(b => b.status === 'skipped');
     
     const totalFocusedMinutes = completedBlocks.reduce((sum, block) => {
@@ -90,14 +220,13 @@ router.get('/', requireAuth, async (req: AuthenticatedRequest, res: Response) =>
 // Get wrapped data (enhanced stats for story mode)
 router.get('/wrapped', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const startOfMonth = new Date();
-    startOfMonth.setDate(1);
-    startOfMonth.setHours(0, 0, 0, 0);
-
-    const endOfMonth = new Date();
-    endOfMonth.setMonth(endOfMonth.getMonth() + 1);
-    endOfMonth.setDate(0);
-    endOfMonth.setHours(23, 59, 59, 999);
+    // Get user's timezone from settings
+    const settingsDoc = await firestore.collection('settings').doc(req.userId!).get();
+    const settings = settingsDoc.exists ? settingsDoc.data() : null;
+    const userTimezone = (settings?.timezone as string) || 'America/New_York';
+    
+    // Get month bounds in UTC for user's timezone
+    const { start: startOfMonth, end: endOfMonth, monthName } = getMonthBoundsInUTC(userTimezone);
 
     // Focus blocks
     const startIso = startOfMonth.toISOString();
@@ -116,9 +245,14 @@ router.get('/wrapped', requireAuth, async (req: AuthenticatedRequest, res: Respo
       .get();
     const goalsById = new Map(goalSnapshot.docs.map(docSnap => [docSnap.id, docSnap.data()]));
 
-    const completedBlocks = focusBlocks.filter(b => b.status === 'completed' || b.status === 'scheduled');
+    // Include completed, scheduled, and moved blocks (moved blocks are still valid focus time)
+    // Include completed, scheduled, and moved blocks (moved blocks are still valid focus time)
+    const completedBlocks = focusBlocks.filter(b => {
+      const status = b.status;
+      return status === 'completed' || status === 'scheduled' || status === 'moved';
+    });
     const skippedBlocks = focusBlocks.filter(b => b.status === 'skipped');
-
+    
     const totalFocusedMinutes = completedBlocks.reduce((sum, block) => {
       return sum + (new Date(block.end).getTime() - new Date(block.start).getTime()) / 60000;
     }, 0);
@@ -348,7 +482,7 @@ router.get('/wrapped', requireAuth, async (req: AuthenticatedRequest, res: Respo
     const recoveredMinutes = rescheduleLogs.reduce((sum, log) => sum + (log.minutesRecovered || 0), 0);
 
     res.json({
-      month: new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
+      month: monthName,
       totalFocusedHours: Math.round(totalFocusedMinutes / 60 * 10) / 10,
       blocksCompleted: completedBlocks.length,
       blocksSkipped: skippedBlocks.length,
