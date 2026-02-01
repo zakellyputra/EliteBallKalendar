@@ -135,10 +135,10 @@ export const reschedule = {
       method: 'POST',
       body: JSON.stringify({ message }),
     }),
-  apply: (operations: RescheduleOperation[]) =>
-    request<{ success: boolean; applied: number }>('/reschedule/apply', {
+  apply: (operations: RescheduleOperation[], reason?: string) =>
+    request<{ success: boolean; applied: number; blocksMovedCount: number; minutesRecovered: number }>('/reschedule/apply', {
       method: 'POST',
-      body: JSON.stringify({ operations }),
+      body: JSON.stringify({ operations, reason: reason || 'User confirmed changes' }),
     }),
 };
 

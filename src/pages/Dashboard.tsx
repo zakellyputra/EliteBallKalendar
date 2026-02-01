@@ -578,27 +578,51 @@ export function Dashboard() {
       id: `block-${index}`,
     });
     
+    const blockStartMinutes = timeToMinutes(block.start);
+    const blockEndMinutes = timeToMinutes(block.end);
+    const blockDurationMinutes = blockEndMinutes - blockStartMinutes;
+    
+    // Find which hour slot this block starts in
+    const blockStartHour = Math.floor(blockStartMinutes / 60);
+    const slotStartMinutes = blockStartHour * 60;
+    
+    // Calculate position within the slot (minutes past the hour start)
+    const minutesPastHour = blockStartMinutes - slotStartMinutes;
+    const topOffset = minutesPastHour; // 1px per minute (60px per hour slot)
+    
+    // Calculate height: duration in pixels
+    // Each slot is 60px tall, with 4px gap (space-y-1) between slots
+    // For blocks spanning multiple slots, we need to account for gaps
+    const slotsSpanned = Math.ceil(blockDurationMinutes / 60);
+    // Height = duration in pixels + gaps between slots
+    const height = blockDurationMinutes + (slotsSpanned > 1 ? (slotsSpanned - 1) * 4 : 0);
+    
+    const baseStyle = {
+      top: `${topOffset}px`,
+      height: `${height}px`,
+    };
+    
     const style = transform ? {
+      ...baseStyle,
       transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
       opacity: isDragging ? 0.5 : 1,
-    } : undefined;
+    } : baseStyle;
     
     return (
       <div
         ref={setNodeRef}
         style={style}
-        className="absolute inset-x-0 rounded-md p-2 bg-green-500/30 border-2 border-dashed border-green-500 cursor-grab active:cursor-grabbing"
+        className="absolute inset-x-0 rounded-md p-2 bg-green-500/30 border-2 border-dashed border-green-500 cursor-grab active:cursor-grabbing z-10"
         {...listeners}
         {...attributes}
       >
         <div className="flex items-start gap-1">
           <GripVertical className="h-3 w-3 text-green-600 flex-shrink-0 mt-0.5" />
           <div className="flex-1 min-w-0">
-            <p className="text-xs font-medium truncate">{block.goalName}</p>
-            <p className="text-xs opacity-75">
+            <p className="text-xs font-medium truncate whitespace-nowrap">{block.goalName}</p>
+            <p className="text-xs opacity-75 truncate whitespace-nowrap">
               {formatTime(block.start)} - {formatTime(block.end)}
             </p>
-            <span className="text-[10px] text-green-600 dark:text-green-400">Drag to move</span>
           </div>
         </div>
       </div>
@@ -614,7 +638,7 @@ export function Dashboard() {
     return (
       <div 
         ref={setNodeRef} 
-        className={`relative min-h-[60px] ${isOver ? 'bg-green-500/20 ring-2 ring-green-500 ring-inset' : ''}`}
+        className={`relative min-h-[60px] overflow-visible ${isOver ? 'bg-green-500/20 ring-2 ring-green-500 ring-inset' : ''}`}
       >
         {children}
       </div>
@@ -1104,7 +1128,7 @@ export function Dashboard() {
                   </div>
 
                   {/* Time Slots */}
-                  <div className="space-y-1">
+                  <div className="space-y-1 overflow-visible">
                     {Array.from({ length: workingEndHour - workingStartHour }, (_, i) => {
                       const hour = workingStartHour + i;
                       const timeStr = `${hour.toString().padStart(2, '0')}:00`;
@@ -1115,52 +1139,73 @@ export function Dashboard() {
                             {hour > 12 ? hour - 12 : hour}:00 {hour >= 12 ? 'PM' : 'AM'}
                           </div>
                           {DAYS_OF_WEEK.map((day) => {
-                            // Find calendar events for this day/time
+                            // Find calendar events that START in this slot (only show once, in their starting slot)
                             const dayEvents = calendarEvents.filter((event) => {
                               const eventDay = getDayFromISO(event.start);
                               const eventStartMinutes = timeToMinutes(event.start);
                               const eventEndMinutes = timeToMinutes(event.end);
-                              const slotMinutes = hour * 60;
+                              const slotStartMinutes = hour * 60;
+                              const slotEndMinutes = (hour + 1) * 60;
                               
                               return (
                                 eventDay === day &&
-                                eventStartMinutes <= slotMinutes &&
-                                eventEndMinutes > slotMinutes
+                                eventStartMinutes >= slotStartMinutes &&
+                                eventStartMinutes < slotEndMinutes
                               );
                             });
 
-                            // Find proposed blocks for this day/time (preview before applying)
+                            // Find proposed blocks that START in this slot
                             const dayProposedBlocks = proposedBlocks.filter((block) => {
                               const blockDay = getDayFromISO(block.start);
                               const blockStartMinutes = timeToMinutes(block.start);
                               const blockEndMinutes = timeToMinutes(block.end);
-                              const slotMinutes = hour * 60;
+                              const slotStartMinutes = hour * 60;
+                              const slotEndMinutes = (hour + 1) * 60;
                               
                               return (
                                 blockDay === day &&
-                                blockStartMinutes <= slotMinutes &&
-                                blockEndMinutes > slotMinutes
+                                blockStartMinutes >= slotStartMinutes &&
+                                blockStartMinutes < slotEndMinutes
                               );
                             });
 
                             return (
                               <DroppableSlot key={day} day={day} hour={hour}>
                                 {/* Existing calendar events */}
-                                {dayEvents.map((event) => (
-                                  <div
-                                    key={event.id}
-                                    className={`absolute inset-x-0 rounded-md p-2 ${
-                                      event.isEliteBall
-                                        ? 'bg-purple-500/20 border-l-4 border-purple-500'
-                                        : 'border-2 border-dashed border-muted-foreground bg-muted/30'
-                                    }`}
-                                  >
-                                    <p className="text-xs font-medium truncate">{event.title}</p>
-                                    <p className="text-xs opacity-75">
-                                      {formatTime(event.start)} - {formatTime(event.end)}
-                                    </p>
-                                  </div>
-                                ))}
+                                {dayEvents.map((event) => {
+                                  const eventStartMinutes = timeToMinutes(event.start);
+                                  const eventEndMinutes = timeToMinutes(event.end);
+                                  const eventDurationMinutes = eventEndMinutes - eventStartMinutes;
+                                  const slotStartMinutes = hour * 60;
+                                  
+                                  // Calculate position within the slot (minutes past the hour start)
+                                  const minutesPastHour = eventStartMinutes - slotStartMinutes;
+                                  const topOffset = minutesPastHour; // 1px per minute (60px per hour slot)
+                                  
+                                  // Calculate height: duration in pixels
+                                  // Each slot is 60px tall, with 4px gap (space-y-1) between slots
+                                  // For events spanning multiple slots, we need to account for gaps
+                                  const slotsSpanned = Math.ceil(eventDurationMinutes / 60);
+                                  // Height = duration in pixels + gaps between slots
+                                  // If event spans exactly to slot boundary, don't add gap for that boundary
+                                  const height = eventDurationMinutes + (slotsSpanned > 1 ? (slotsSpanned - 1) * 4 : 0);
+                                  
+                                  return (
+                                    <div
+                                      key={event.id}
+                                      className="absolute inset-x-0 rounded-md p-2 border-2 border-dashed border-muted-foreground bg-muted/30 z-10"
+                                      style={{
+                                        top: `${topOffset}px`,
+                                        height: `${height}px`,
+                                      }}
+                                    >
+                                      <p className="text-xs font-medium truncate whitespace-nowrap">{event.title}</p>
+                                      <p className="text-xs opacity-75 truncate whitespace-nowrap">
+                                        {formatTime(event.start)} - {formatTime(event.end)}
+                                      </p>
+                                    </div>
+                                  );
+                                })}
 
                                 {/* Proposed blocks (pending - draggable) */}
                                 {dayProposedBlocks.map((block) => {
