@@ -215,11 +215,21 @@ export interface Goal {
   name: string;
   targetMinutesPerWeek: number;
   createdAt: string;
+  preferredTime?: {
+    start: string; // HH:mm
+    end: string;   // HH:mm
+  };
+  sessionsPerWeek?: number;
 }
 
 export interface CreateGoalInput {
   name: string;
   targetMinutesPerWeek: number;
+  preferredTime?: {
+    start: string;
+    end: string;
+  };
+  sessionsPerWeek?: number;
 }
 
 export interface Settings {
@@ -320,6 +330,9 @@ export interface WrappedData {
     weekendPercent: number;
     sentiment: 'positive' | 'neutral' | 'negative';
   };
-  hoursAddedViaReschedule: number;
-  hoursAddedBreakdown: { goalId: string; name: string; hoursAdded: number }[];
+  persona: {
+    name: string;
+    description: string;
+    image: string;
+  };
 }

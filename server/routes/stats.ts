@@ -152,35 +152,39 @@ router.get('/wrapped', requireAuth, async (req: AuthenticatedRequest, res: Respo
 
     // Calculate week-by-week hours
     const weeklyHours: { week: number; hours: number; label: string }[] = [];
-    const weeksInMonth = Math.ceil((endOfMonth.getDate() + startOfMonth.getDay()) / 7);
+    const currentWeekStart = new Date(startOfMonth);
+    let weekNum = 1;
 
-    for (let week = 0; week < weeksInMonth; week++) {
-      const weekStart = new Date(startOfMonth);
-      weekStart.setDate(startOfMonth.getDate() + (week * 7) - startOfMonth.getDay());
-      if (weekStart < startOfMonth) weekStart.setTime(startOfMonth.getTime());
-
-      const weekEnd = new Date(weekStart);
-      weekEnd.setDate(weekStart.getDate() + 6);
-      weekEnd.setHours(23, 59, 59, 999);
-      if (weekEnd > endOfMonth) weekEnd.setTime(endOfMonth.getTime());
-
+    while (currentWeekStart <= endOfMonth) {
+      const currentWeekEnd = new Date(currentWeekStart);
+      currentWeekEnd.setDate(currentWeekStart.getDate() + 6);
+      
+      // Cap at end of month
+      const effectiveEnd = currentWeekEnd > endOfMonth ? endOfMonth : currentWeekEnd;
+      // Set to end of day
+      effectiveEnd.setHours(23, 59, 59, 999);
+      
       const weekBlocks = completedBlocks.filter(block => {
         const blockStart = new Date(block.start);
-        return blockStart >= weekStart && blockStart <= weekEnd;
+        return blockStart >= currentWeekStart && blockStart <= effectiveEnd;
       });
 
       const weekMinutes = weekBlocks.reduce((sum, block) => {
         return sum + (new Date(block.end).getTime() - new Date(block.start).getTime()) / 60000;
       }, 0);
 
-      const startLabel = weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-      const endLabel = weekEnd.toLocaleDateString('en-US', { day: 'numeric' });
+      const startLabel = currentWeekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      const endLabel = effectiveEnd.toLocaleDateString('en-US', { day: 'numeric' });
 
       weeklyHours.push({
-        week: week + 1,
+        week: weekNum,
         hours: Math.round(weekMinutes / 60 * 10) / 10,
         label: `${startLabel}-${endLabel}`,
       });
+
+      // Move to next week
+      currentWeekStart.setDate(currentWeekStart.getDate() + 7);
+      weekNum++;
     }
 
     // Calculate weekday vs weekend split
@@ -220,79 +224,112 @@ router.get('/wrapped', requireAuth, async (req: AuthenticatedRequest, res: Respo
       sentiment,
     };
 
-    // Reschedule logs
-    const rescheduleSnapshot = await firestore.collection('rescheduleLogs')
-      .where('userId', '==', req.userId!)
-      .where('timestamp', '>=', startIso)
-      .where('timestamp', '<=', endIso)
-      .get();
-    const rescheduleLogs = rescheduleSnapshot.docs.map(docSnap => docSnap.data()) as any[];
-
-    const rescheduleCount = rescheduleLogs.length;
-    const recoveredMinutes = rescheduleLogs.reduce((sum, log) => sum + (log.minutesRecovered || 0), 0);
-
-    // Calculate hours added via reschedule (blocks created through reschedule operations)
-    const hoursAddedBreakdown: Record<string, { name: string; minutes: number }> = {};
-    let totalAddedMinutes = 0;
-
-    for (const log of rescheduleLogs) {
-      if (log.operations && Array.isArray(log.operations)) {
-        for (const op of log.operations) {
-          if (op.op === 'create' && op.start && op.end) {
-            const minutes = (new Date(op.end).getTime() - new Date(op.start).getTime()) / 60000;
-            totalAddedMinutes += minutes;
-
-            const goalName = op.goalName || 'Unknown';
-            if (!hoursAddedBreakdown[goalName]) {
-              hoursAddedBreakdown[goalName] = { name: goalName, minutes: 0 };
-            }
-            hoursAddedBreakdown[goalName].minutes += minutes;
-          }
-        }
-      }
-    }
-
     // Generate achievements
     const achievements: string[] = [];
 
     if (completedBlocks.length > 0) {
       const completionRate = completedBlocks.length / (completedBlocks.length + skippedBlocks.length);
-      if (completionRate >= 0.9) {
-        achievements.push(`Completed ${Math.round(completionRate * 100)}% of scheduled blocks`);
+      if (completionRate >= 0.95) {
+        achievements.push('Focus Master - 95%+ completion rate');
+      } else if (completionRate >= 0.8) {
+        achievements.push(`Reliable - ${Math.round(completionRate * 100)}% completion rate`);
       }
     }
 
-    if (totalFocusedMinutes > 100) {
-      achievements.push(`Focused for ${Math.round(totalFocusedMinutes)} minutes`);
+    if (totalFocusedMinutes > 1000) {
+      achievements.push('Deep Worker - Over 1000 minutes focused');
     }
 
-    if (rescheduleCount > 0) {
-      achievements.push(`Used AI to reschedule ${rescheduleCount} times`);
+    if (Object.keys(goalBreakdown).length >= 4) {
+      achievements.push('Renaissance Mind - Worked on 4+ different goals');
     }
 
-    if (recoveredMinutes > 0) {
-      achievements.push(`Recovered ${Math.round(recoveredMinutes)} minutes of focus time`);
-    }
-
-    if (Object.keys(goalBreakdown).length >= 3) {
-      achievements.push(`Worked on ${Object.keys(goalBreakdown).length} different goals`);
-    }
-
-    // New achievements
     if (weekendMinutes / 60 > 5) {
       achievements.push('Weekend Warrior - Over 5 hours on weekends');
     }
 
-    if (weekdayPercent > 90) {
-      achievements.push('Weekday Champion - 90%+ of work on weekdays');
+    // Check for Night Owl (blocks starting after 8 PM)
+    const nightBlocks = completedBlocks.filter(b => new Date(b.start).getHours() >= 20);
+    if (nightBlocks.length >= 3) {
+      achievements.push('Night Owl - 3+ late night sessions');
     }
 
-    if (totalAddedMinutes / 60 > 2) {
-      achievements.push('Flexible Scheduler - Added 2+ hours via reschedule');
+    // Check for Early Bird (blocks starting before 7 AM)
+    const earlyBlocks = completedBlocks.filter(b => new Date(b.start).getHours() < 7);
+    if (earlyBlocks.length >= 3) {
+      achievements.push('Early Bird - 3+ early morning sessions');
+    }
+    
+    // Marathon Runner (blocks > 90 mins)
+    const longBlocks = completedBlocks.filter(b => (new Date(b.end).getTime() - new Date(b.start).getTime()) / 60000 >= 90);
+    if (longBlocks.length >= 2) {
+      achievements.push('Marathon Runner - 2+ long sessions (>90m)');
     }
 
     if (achievements.length === 0) {
       achievements.push('Start scheduling focus blocks to earn achievements!');
+    }
+
+    // Determine Persona
+    let persona = {
+      name: 'The Apprentice',
+      description: 'You are just getting started on your journey. Greatness awaits!',
+      image: 'mario-ai-104.png'
+    };
+
+    const distinctDays = new Set(completedBlocks.map(b => new Date(b.start).toDateString())).size;
+    const completionRate = completedBlocks.length > 0 
+      ? completedBlocks.length / (completedBlocks.length + skippedBlocks.length)
+      : 0;
+    
+    // 1. Time Perfectionist
+    if (completionRate >= 0.95 && completedBlocks.length >= 5) {
+      persona = {
+        name: 'Time Perfectionist',
+        description: 'You stick to your schedule with incredible precision. Nothing slips through the cracks.',
+        image: 'lebron-ai-104.png'
+      };
+    } 
+    // 2. Crammy Jammy
+    else {
+        let nightMinutes = 0;
+        let lastWeekMinutes = 0;
+        const lastWeekStart = new Date(endOfMonth);
+        lastWeekStart.setDate(endOfMonth.getDate() - 7);
+        
+        for (const block of completedBlocks) {
+            const start = new Date(block.start);
+            if (start.getHours() >= 20 || start.getHours() < 4) {
+                nightMinutes += (new Date(block.end).getTime() - start.getTime()) / 60000;
+            }
+            if (start >= lastWeekStart) {
+                lastWeekMinutes += (new Date(block.end).getTime() - start.getTime()) / 60000;
+            }
+        }
+        
+        if (totalFocusedMinutes > 0 && ((nightMinutes / totalFocusedMinutes > 0.3) || (lastWeekMinutes / totalFocusedMinutes > 0.4))) {
+             persona = {
+                name: 'Crammy Jammy',
+                description: 'You thrive under pressure and burn the midnight oil. Deadlines are your fuel.',
+                image: 'newjeans-ai-104.png'
+            };
+        }
+        // 3. Weekend Warrior
+        else if (weekendPercent > 40 && totalFocusedMinutes > 180) {
+             persona = {
+                name: 'Weekend Warrior',
+                description: 'While others rest, you grind. Your weekends are legendary for productivity.',
+                image: 'matcha-cup-104.png'
+            };
+        }
+        // 4. Steady Eddie
+        else if (distinctDays >= 15) {
+             persona = {
+                name: 'Steady Eddie',
+                description: 'Consistency is your middle name. You show up every single day.',
+                image: 'mario-ai-104.png'
+            };
+        }
     }
 
     res.json({
@@ -314,14 +351,7 @@ router.get('/wrapped', requireAuth, async (req: AuthenticatedRequest, res: Respo
       achievements,
       weeklyHours,
       weekdayWeekendSplit,
-      hoursAddedViaReschedule: Math.round(totalAddedMinutes / 60 * 10) / 10,
-      hoursAddedBreakdown: Object.entries(hoursAddedBreakdown)
-        .map(([goalName, data]) => ({
-          goalId: goalName,
-          name: data.name,
-          hoursAdded: Math.round(data.minutes / 60 * 10) / 10,
-        }))
-        .sort((a, b) => b.hoursAdded - a.hoursAdded),
+      persona,
     });
   } catch (err: any) {
     console.error('Error fetching wrapped data:', err);

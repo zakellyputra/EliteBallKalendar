@@ -9,6 +9,17 @@ import { motion, AnimatePresence } from 'motion/react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
 import { useStats } from '../hooks/useStats';
 import { useAuthContext } from '../components/AuthProvider';
+import marioAi from '../assets/mario/mario-ai-104.png';
+import lebronAi from '../assets/lebron/lebron-ai-104.png';
+import newjeansAi from '../assets/newjeans/newjeans-ai-104.png';
+import matchaCup from '../assets/matcha/matcha-cup-104.png';
+
+const PERSONA_IMAGES: Record<string, string> = {
+  'mario-ai-104.png': marioAi,
+  'lebron-ai-104.png': lebronAi,
+  'newjeans-ai-104.png': newjeansAi,
+  'matcha-cup-104.png': matchaCup,
+};
 
 const COLORS = ['#a855f7', '#3b82f6', '#ec4899', '#10b981', '#f97316', '#06b6d4'];
 
@@ -63,21 +74,21 @@ export function Statistics() {
     },
     {
       id: 7,
-      type: 'hours-added',
-      title: 'Flexibility Wins',
-      subtitle: 'Hours added after initial schedule',
-    },
-    {
-      id: 8,
       type: 'productivity',
       title: 'Peak Performance',
       subtitle: 'Your most productive moments',
     },
     {
-      id: 9,
+      id: 8,
       type: 'achievements',
       title: 'Achievements Unlocked',
       subtitle: `${wrapped?.month || 'This month'} milestones`,
+    },
+    {
+      id: 9,
+      type: 'persona',
+      title: wrapped?.persona?.name || 'The Apprentice',
+      subtitle: 'Your Productivity Persona',
     },
     {
       id: 10,
@@ -300,58 +311,52 @@ export function Statistics() {
           </div>
         );
 
-      case 'hours-added':
-        const hoursAdded = wrapped?.hoursAddedViaReschedule || 0;
-        const addedBreakdown = wrapped?.hoursAddedBreakdown || [];
+      case 'persona':
+        const personaImage = wrapped?.persona?.image && PERSONA_IMAGES[wrapped.persona.image] 
+          ? PERSONA_IMAGES[wrapped.persona.image] 
+          : PERSONA_IMAGES['mario-ai-104.png'];
+
         return (
           <div className="flex h-full flex-col items-center justify-center text-center px-8">
             <motion.div
-              initial={{ scale: 0 }}
-              animate={{ scale: 1 }}
-              transition={{ delay: 0.2, type: 'spring' }}
-              className="mb-6"
+              initial={{ scale: 0, rotate: -10 }}
+              animate={{ scale: 1, rotate: 0 }}
+              transition={{ delay: 0.2, type: 'spring', stiffness: 260, damping: 20 }}
+              className="mb-8 relative"
             >
-              <Plus className="h-16 w-16 text-green-500" />
-            </motion.div>
-            <motion.div
-              initial={{ opacity: 0, scale: 0.5 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: 0.4, type: 'spring' }}
-              className="mb-4 bg-gradient-to-r from-green-500 to-teal-500 bg-clip-text text-7xl font-bold text-transparent"
-            >
-              +{hoursAdded}h
+              <div className="absolute inset-0 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 blur-2xl opacity-50 animate-pulse" />
+              <img 
+                src={personaImage} 
+                alt={wrapped?.persona?.name || 'Persona'} 
+                className="relative h-48 w-48 object-contain drop-shadow-2xl"
+              />
             </motion.div>
             <motion.h2
-              initial={{ opacity: 0, y: 20 }}
+              initial={{ opacity: 0, y: -20 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.6 }}
-              className="mb-2 text-3xl font-bold"
+              transition={{ delay: 0.4 }}
+              className="mb-2 text-5xl font-bold bg-gradient-to-r from-purple-400 to-pink-600 bg-clip-text text-transparent"
             >
               {slide.title}
             </motion.h2>
             <motion.p
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              transition={{ delay: 0.8 }}
+              transition={{ delay: 0.6 }}
               className="mb-8 text-xl text-muted-foreground"
             >
               {slide.subtitle}
             </motion.p>
-            {addedBreakdown.length > 0 && (
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 1 }}
-                className="w-full max-w-md space-y-2"
-              >
-                {addedBreakdown.slice(0, 3).map((item, idx) => (
-                  <div key={idx} className="flex items-center justify-between rounded-lg bg-white/10 px-4 py-2">
-                    <span>{item.name}</span>
-                    <span className="font-bold text-green-400">+{item.hoursAdded}h</span>
-                  </div>
-                ))}
-              </motion.div>
-            )}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.8 }}
+              className="max-w-xl mx-auto p-6 rounded-2xl bg-white/10 backdrop-blur-sm border border-white/20"
+            >
+              <p className="text-xl leading-relaxed">
+                {wrapped?.persona?.description || 'Start working to discover your persona!'}
+              </p>
+            </motion.div>
           </div>
         );
 
@@ -641,15 +646,33 @@ export function Statistics() {
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-muted-foreground">Hours Added</p>
-                    <p className="text-3xl font-bold">+{wrapped?.hoursAddedViaReschedule || 0}</p>
-                    <p className="text-xs text-muted-foreground">via reschedule</p>
+                    <p className="text-sm text-muted-foreground">Persona</p>
+                    <p className="text-lg font-bold truncate max-w-[120px]">{wrapped?.persona?.name || 'N/A'}</p>
+                    <p className="text-xs text-muted-foreground">Your style</p>
                   </div>
-                  <Plus className="h-10 w-10 text-teal-500" />
+                  <Zap className="h-10 w-10 text-yellow-500" />
                 </div>
               </CardContent>
             </Card>
           </div>
+
+          {/* Persona Section */}
+          <Card className="mb-6 bg-gradient-to-br from-purple-900/10 to-blue-900/10 border-purple-500/20">
+            <CardContent className="pt-6 flex flex-col md:flex-row items-center gap-6">
+                 <div className="h-32 w-32 flex-shrink-0 relative">
+                    <div className="absolute inset-0 bg-gradient-to-br from-purple-500/20 to-blue-500/20 rounded-full blur-xl" />
+                    <img 
+                        src={wrapped?.persona?.image && PERSONA_IMAGES[wrapped.persona.image] ? PERSONA_IMAGES[wrapped.persona.image] : PERSONA_IMAGES['mario-ai-104.png']} 
+                        alt="Persona" 
+                        className="relative h-full w-full object-contain"
+                    />
+                 </div>
+                 <div className="text-center md:text-left">
+                    <h3 className="text-2xl font-bold mb-2">{wrapped?.persona?.name || 'The Apprentice'}</h3>
+                    <p className="text-muted-foreground text-lg">{wrapped?.persona?.description || 'Start working to discover your persona!'}</p>
+                 </div>
+            </CardContent>
+          </Card>
 
           {/* Weekly Trend Chart */}
           <Card className="mb-6">
@@ -734,23 +757,7 @@ export function Statistics() {
             </Card>
           </div>
 
-          {/* Hours Added Section */}
-          {(wrapped?.hoursAddedViaReschedule || 0) > 0 && (
-            <Card className="mt-6">
-              <CardContent className="pt-6">
-                <h3 className="mb-4">Hours Added via Reschedule</h3>
-                <p className="text-2xl font-bold text-teal-500 mb-4">+{wrapped?.hoursAddedViaReschedule}h total</p>
-                <div className="grid gap-3 md:grid-cols-2">
-                  {wrapped?.hoursAddedBreakdown?.map((item, idx) => (
-                    <div key={idx} className="flex items-center justify-between rounded-lg border border-border p-3">
-                      <span>{item.name}</span>
-                      <span className="font-bold text-teal-500">+{item.hoursAdded}h</span>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          )}
+
 
           {/* Achievements */}
           <Card className="mt-6">

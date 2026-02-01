@@ -38,13 +38,50 @@ export function useSettings() {
       const settingsRef = doc(db, 'settings', user.id);
       const snapshot = await getDoc(settingsRef);
       if (!snapshot.exists()) {
+        // Check for local preferences from onboarding
+        let initialDefaults = { ...DEFAULT_WORKING_WINDOW };
+        let initialBlockLength = 30;
+        let initialMinGap = 5;
+
+        try {
+          const localPrefs = localStorage.getItem('ebk-preferences');
+          if (localPrefs) {
+            const prefs = JSON.parse(localPrefs);
+            
+            // Map working days
+            if (prefs.workingDays && Array.isArray(prefs.workingDays)) {
+              // Reset all to disabled first
+              Object.keys(initialDefaults).forEach(day => {
+                initialDefaults[day] = { ...initialDefaults[day], enabled: false };
+              });
+              
+              // Enable selected days and set times
+              prefs.workingDays.forEach((day: string) => {
+                const dayKey = day.toLowerCase();
+                if (initialDefaults[dayKey]) {
+                  initialDefaults[dayKey] = {
+                    enabled: true,
+                    start: prefs.startTime || '09:00',
+                    end: prefs.endTime || '17:00',
+                  };
+                }
+              });
+            }
+            
+            if (prefs.blockLength) initialBlockLength = parseInt(prefs.blockLength);
+            if (prefs.breakLength) initialMinGap = parseInt(prefs.breakLength);
+          }
+        } catch (e) {
+          console.error('Failed to parse local preferences', e);
+        }
+
         const defaults: Settings = {
           id: user.id,
           userId: user.id,
-          workingWindow: DEFAULT_WORKING_WINDOW,
-          blockLengthMinutes: 30,
+          workingWindow: initialDefaults,
+          blockLengthMinutes: initialBlockLength,
           timezone: 'America/New_York',
-          minGapMinutes: 5,
+          minGapMinutes: initialMinGap,
           selectedCalendars: null,
         };
         await setDoc(settingsRef, defaults);
