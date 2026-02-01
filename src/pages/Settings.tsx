@@ -8,11 +8,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Switch } from '../components/ui/switch';
 import { Checkbox } from '../components/ui/checkbox';
 import { Separator } from '../components/ui/separator';
-import { Settings as SettingsIcon, Calendar, Bell, Database, Loader2, RefreshCw } from 'lucide-react';
+import { Settings as SettingsIcon, Calendar, Bell, Database, Loader2, RefreshCw, Palette } from 'lucide-react';
 import { toast } from 'sonner';
 import { useSettings } from '../hooks/useSettings';
 import { useAuthContext } from '../components/AuthProvider';
 import { WorkingWindow, CalendarInfo, calendar as calendarApi, auth as authApi } from '../lib/api';
+import { useTheme } from '../components/ThemeProvider';
+import { brandGradientBgHorizontal } from '../lib/theme-utils';
 
 const DAYS_OF_WEEK = [
   { key: 'monday', label: 'Monday' },
@@ -24,8 +26,42 @@ const DAYS_OF_WEEK = [
   { key: 'sunday', label: 'Sunday' },
 ];
 
+const COLOR_THEMES = [
+  {
+    value: 'default',
+    label: 'Default',
+    description: 'Classic purple and blue',
+    colors: ['#a855f7', '#3b82f6'],
+  },
+  {
+    value: 'matcha',
+    label: 'Matcha',
+    description: 'Earthy greens and cream',
+    colors: ['#6b8e23', '#8fbc8f'],
+  },
+  {
+    value: 'newjeans',
+    label: 'NewJeans',
+    description: 'Y2K pastel vibes',
+    colors: ['#b4a7d6', '#a8d8ea'],
+  },
+  {
+    value: 'lebron',
+    label: 'LeBron',
+    description: 'Lakers purple and gold',
+    colors: ['#552583', '#fdb927'],
+  },
+  {
+    value: 'mario',
+    label: 'Mario',
+    description: 'Vibrant primary colors',
+    colors: ['#e60012', '#0072ce'],
+  },
+];
+
 export function Settings() {
   const { isAuthenticated, user } = useAuthContext();
+  const { colorTheme, setColorTheme } = useTheme();
   const { settings, loading, updateSettings, defaultWorkingWindow } = useSettings();
   
   const [workingWindow, setWorkingWindow] = useState<WorkingWindow>(defaultWorkingWindow);
@@ -334,6 +370,73 @@ export function Settings() {
               </CardContent>
             </Card>
 
+            {/* Appearance */}
+            <Card>
+              <CardHeader>
+                <div className="flex items-center gap-2">
+                  <Palette className="h-5 w-5" style={{ color: 'var(--brand-primary)' }} />
+                  <CardTitle>Appearance</CardTitle>
+                </div>
+                <CardDescription>Customize the look and feel of your app</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Color Theme</Label>
+                  <div className="grid gap-3">
+                    {COLOR_THEMES.map((theme) => (
+                      <button
+                        key={theme.value}
+                        onClick={() => {
+                          setColorTheme(theme.value as typeof colorTheme);
+                          toast.success(`Switched to ${theme.label} theme`);
+                        }}
+                        className={`flex items-center justify-between rounded-lg border-2 p-4 text-left transition-all hover:bg-accent/50 ${
+                          colorTheme === theme.value
+                            ? 'border-primary bg-accent/50'
+                            : 'border-border'
+                        }`}
+                        type="button"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="flex gap-1">
+                            {theme.colors.map((color) => (
+                              <div
+                                key={color}
+                                className="h-8 w-8 rounded-full border border-border"
+                                style={{ backgroundColor: color }}
+                              />
+                            ))}
+                          </div>
+                          <div>
+                            <p className="font-medium">{theme.label}</p>
+                            <p className="text-xs text-muted-foreground">{theme.description}</p>
+                          </div>
+                        </div>
+                        {colorTheme === theme.value && (
+                          <div
+                            className="flex h-5 w-5 items-center justify-center rounded-full"
+                            style={{ backgroundColor: 'var(--brand-primary)' }}
+                          >
+                            <svg
+                              className="h-3 w-3 text-white"
+                              fill="none"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth="3"
+                              viewBox="0 0 24 24"
+                              stroke="currentColor"
+                            >
+                              <path d="M5 13l4 4L19 7" />
+                            </svg>
+                          </div>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
             {/* Work Preferences */}
             <Card>
               <CardHeader>
@@ -450,7 +553,7 @@ export function Settings() {
               </Button>
               <Button 
                 onClick={handleSave} 
-                className="bg-gradient-to-r from-purple-500 to-blue-500"
+                style={brandGradientBgHorizontal}
                 disabled={saving || loading || !isAuthenticated}
               >
                 {saving ? (

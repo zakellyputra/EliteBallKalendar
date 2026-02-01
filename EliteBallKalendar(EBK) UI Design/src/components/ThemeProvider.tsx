@@ -18,32 +18,33 @@ type ThemeProviderState = {
 
 const ThemeProviderContext = createContext<ThemeProviderState | undefined>(undefined);
 
-export function ThemeProvider({
-  children,
+export function ThemeProvider({ 
+  children, 
   defaultTheme = 'light',
-  defaultColorTheme = 'default',
+  defaultColorTheme = 'default'
 }: ThemeProviderProps) {
   const [theme, setTheme] = useState<Theme>(
     () => (localStorage.getItem('ebk-theme') as Theme) || defaultTheme
   );
+  
   const [colorTheme, setColorTheme] = useState<ColorTheme>(
     () => (localStorage.getItem('ebk-color-theme') as ColorTheme) || defaultColorTheme
   );
 
   useEffect(() => {
     const root = window.document.documentElement;
+    
+    // Remove all theme classes
     root.classList.remove('light', 'dark');
-    root.classList.remove(
-      'theme-default',
-      'theme-matcha',
-      'theme-newjeans',
-      'theme-lebron',
-      'theme-mario'
-    );
+    root.classList.remove('theme-default', 'theme-matcha', 'theme-newjeans', 'theme-lebron', 'theme-mario');
+    
+    // Add current theme classes
     root.classList.add(theme);
     if (colorTheme !== 'default') {
       root.classList.add(`theme-${colorTheme}`);
     }
+    
+    // Save to localStorage
     localStorage.setItem('ebk-theme', theme);
     localStorage.setItem('ebk-color-theme', colorTheme);
   }, [theme, colorTheme]);

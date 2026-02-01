@@ -15,6 +15,12 @@ import { useScheduler } from '../hooks/useScheduler';
 import { useSettings } from '../hooks/useSettings';
 import { calendar, CalendarEvent, Goal, ProposedBlock } from '../lib/api';
 import { DndContext, DragEndEvent, useDraggable, useDroppable, DragOverlay } from '@dnd-kit/core';
+import { useTheme } from '../components/ThemeProvider';
+import matchaLatte from '../assets/matcha/matcha-latte-152.png';
+import matchaSet from '../assets/matcha/matcha-set-186.png';
+import newjeansHeader from '../assets/newjeans/newjeans-header-40.png';
+import marioHeader from '../assets/mario/mario-header-40.png';
+import lebronHeader from '../assets/lebron/lebron-header-40.png';
 
 const DAYS_OF_WEEK = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 const COLORS = ['bg-purple-500', 'bg-blue-500', 'bg-pink-500', 'bg-green-500', 'bg-orange-500', 'bg-cyan-500'];
@@ -42,6 +48,7 @@ function getISOWeek(date: Date): number {
 export function Dashboard() {
   const navigate = useNavigate();
   const { isAuthenticated, loading: authLoading } = useAuthContext();
+  const { colorTheme } = useTheme();
   const { goals, loading: goalsLoading, createGoal, deleteGoal } = useGoals();
   const { 
     proposedBlocks, 
@@ -589,7 +596,41 @@ export function Dashboard() {
           <CardHeader>
             <div className="flex items-center justify-between">
               <div>
-                <CardTitle>Weekly Goals</CardTitle>
+                <div className="flex items-center gap-3">
+                  <CardTitle>Weekly Goals</CardTitle>
+                  {colorTheme === 'matcha' && (
+                    <img
+                      src={matchaLatte}
+                      alt=""
+                      aria-hidden="true"
+                      className="pointer-events-none h-10 w-10 bg-transparent"
+                    />
+                  )}
+                  {colorTheme === 'newjeans' && (
+                    <img
+                      src={newjeansHeader}
+                      alt=""
+                      aria-hidden="true"
+                      className="pointer-events-none h-10 w-10 bg-transparent"
+                    />
+                  )}
+                  {colorTheme === 'mario' && (
+                    <img
+                      src={marioHeader}
+                      alt=""
+                      aria-hidden="true"
+                      className="pointer-events-none h-10 w-10 bg-transparent"
+                    />
+                  )}
+                  {colorTheme === 'lebron' && (
+                    <img
+                      src={lebronHeader}
+                      alt=""
+                      aria-hidden="true"
+                      className="pointer-events-none h-10 w-auto bg-transparent"
+                    />
+                  )}
+                </div>
                 <CardDescription>Manage your focus areas for this week</CardDescription>
               </div>
               <Dialog open={showAddGoal} onOpenChange={setShowAddGoal}>
@@ -644,49 +685,51 @@ export function Dashboard() {
             </div>
           </CardHeader>
           <CardContent>
-            {goalsLoading ? (
-              <div className="py-12 text-center">
-                <Loader2 className="mx-auto mb-4 h-8 w-8 animate-spin text-muted-foreground" />
-                <p className="text-muted-foreground">Loading goals...</p>
-              </div>
-            ) : goals.length === 0 ? (
-              <div className="py-12 text-center">
-                <BookOpen className="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
-                <p className="text-muted-foreground">
-                  No goals yet. Add your first goal to get started!
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {goals.map((goal, index) => (
-                  <div
-                    key={goal.id}
-                    className="flex items-center justify-between rounded-lg border border-border p-4"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className={`h-3 w-3 rounded-full ${getGoalColor(index)}`} />
-                      <div>
-                        <p className="font-medium">{goal.name}</p>
-                        <p className="text-sm text-muted-foreground">
-                          Target: {goal.targetMinutesPerWeek / 60} hours/week
-                        </p>
+            <div className="relative z-10">
+              {goalsLoading ? (
+                <div className="py-12 text-center">
+                  <Loader2 className="mx-auto mb-4 h-8 w-8 animate-spin text-muted-foreground" />
+                  <p className="text-muted-foreground">Loading goals...</p>
+                </div>
+              ) : goals.length === 0 ? (
+                <div className="py-12 text-center">
+                  <BookOpen className="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
+                  <p className="text-muted-foreground">
+                    No goals yet. Add your first goal to get started!
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {goals.map((goal, index) => (
+                    <div
+                      key={goal.id}
+                      className="flex items-center justify-between rounded-lg border border-border p-4"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className={`h-3 w-3 rounded-full ${getGoalColor(index)}`} />
+                        <div>
+                          <p className="font-medium">{goal.name}</p>
+                          <p className="text-sm text-muted-foreground">
+                            Target: {goal.targetMinutesPerWeek / 60} hours/week
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="secondary">{goal.targetMinutesPerWeek / 60}h/week</Badge>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="text-destructive hover:text-destructive"
+                          onClick={() => handleDeleteGoal(goal.id)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Badge variant="secondary">{goal.targetMinutesPerWeek / 60}h/week</Badge>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="text-destructive hover:text-destructive"
-                        onClick={() => handleDeleteGoal(goal.id)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+                  ))}
+                </div>
+              )}
+            </div>
           </CardContent>
         </Card>
 

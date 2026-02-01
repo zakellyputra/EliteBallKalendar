@@ -31,7 +31,12 @@ export function Navigation() {
         <div className="flex h-16 items-center justify-between">
           <div className="flex items-center gap-8">
             <Link to="/" className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-purple-500 to-blue-500">
+              <div
+                className="flex h-8 w-8 items-center justify-center rounded-lg"
+                style={{
+                  background: 'linear-gradient(to bottom right, var(--brand-primary), var(--brand-secondary))',
+                }}
+              >
                 <span className="text-sm font-bold text-white">EBK</span>
               </div>
               <span className="text-lg font-semibold">Elite Ball Kalendar</span>
