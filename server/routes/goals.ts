@@ -27,7 +27,7 @@ router.get('/', requireAuth, async (req: AuthenticatedRequest, res: Response) =>
 // Create a new goal
 router.post('/', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { name, targetMinutesPerWeek } = req.body;
+    const { name, targetMinutesPerWeek, preferredTime, sessionsPerWeek } = req.body;
 
     if (!name || targetMinutesPerWeek === undefined) {
       return res.status(400).json({ error: 'Name and targetMinutesPerWeek are required' });
@@ -37,6 +37,8 @@ router.post('/', requireAuth, async (req: AuthenticatedRequest, res: Response) =
       userId: req.userId!,
       name,
       targetMinutesPerWeek: parseInt(targetMinutesPerWeek),
+      preferredTime: preferredTime || null,
+      sessionsPerWeek: sessionsPerWeek ? parseInt(sessionsPerWeek) : null,
       createdAt: new Date().toISOString(),
     });
 
@@ -55,7 +57,7 @@ router.put('/:id', requireAuth, async (req: AuthenticatedRequest, res: Response)
     if (Array.isArray(id)) {
       return res.status(400).json({ error: 'Invalid goal id' });
     }
-    const { name, targetMinutesPerWeek } = req.body;
+    const { name, targetMinutesPerWeek, preferredTime, sessionsPerWeek } = req.body;
 
     // Verify ownership
     const docRef = firestore.collection('goals').doc(id);
@@ -69,6 +71,8 @@ router.put('/:id', requireAuth, async (req: AuthenticatedRequest, res: Response)
     if (targetMinutesPerWeek !== undefined) {
       updateData.targetMinutesPerWeek = parseInt(targetMinutesPerWeek);
     }
+    if (preferredTime !== undefined) updateData.preferredTime = preferredTime;
+    if (sessionsPerWeek !== undefined) updateData.sessionsPerWeek = sessionsPerWeek ? parseInt(sessionsPerWeek) : null;
 
     await docRef.set(updateData, { merge: true });
     const updated = await docRef.get();

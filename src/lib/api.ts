@@ -215,11 +215,21 @@ export interface Goal {
   name: string;
   targetMinutesPerWeek: number;
   createdAt: string;
+  preferredTime?: {
+    start: string; // HH:mm
+    end: string;   // HH:mm
+  };
+  sessionsPerWeek?: number;
 }
 
 export interface CreateGoalInput {
   name: string;
   targetMinutesPerWeek: number;
+  preferredTime?: {
+    start: string;
+    end: string;
+  };
+  sessionsPerWeek?: number;
 }
 
 export interface Settings {
@@ -308,9 +318,21 @@ export interface WrappedData {
   blocksSkipped: number;
   rescheduleCount: number;
   recoveredMinutes: number;
-  tokensSaved: number;
   peakProductivityDay: string;
   peakProductivityHour: string;
   goalBreakdown: { goalId: string; name: string; hours: number }[];
   achievements: string[];
+  weeklyHours: { week: number; hours: number; label: string }[];
+  weekdayWeekendSplit: {
+    weekdayHours: number;
+    weekdayPercent: number;
+    weekendHours: number;
+    weekendPercent: number;
+    sentiment: 'positive' | 'neutral' | 'negative';
+  };
+  persona: {
+    name: string;
+    description: string;
+    image: string;
+  };
 }

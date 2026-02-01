@@ -70,7 +70,13 @@ export function Dashboard() {
   const [eventsLoading, setEventsLoading] = useState(false);
   const [calendarError, setCalendarError] = useState<string | null>(null);
   const [showAddGoal, setShowAddGoal] = useState(false);
-  const [newGoal, setNewGoal] = useState({ name: '', hours: '' });
+  const [newGoal, setNewGoal] = useState({ 
+    name: '', 
+    hours: '',
+    preferredStart: '',
+    preferredEnd: '',
+    sessionsPerWeek: ''
+  });
   const [saving, setSaving] = useState(false);
   const [weekOffset, setWeekOffset] = useState(0); // 0 = current week, -1 = previous, +1 = next
   
@@ -226,14 +232,27 @@ export function Dashboard() {
     }
 
     setSaving(true);
-    const goal = await createGoal({
+    const goalData: any = {
       name: newGoal.name,
       targetMinutesPerWeek: parseInt(newGoal.hours) * 60,
-    });
+    };
+
+    if (newGoal.preferredStart && newGoal.preferredEnd) {
+      goalData.preferredTime = {
+        start: newGoal.preferredStart,
+        end: newGoal.preferredEnd,
+      };
+    }
+
+    if (newGoal.sessionsPerWeek) {
+      goalData.sessionsPerWeek = parseInt(newGoal.sessionsPerWeek);
+    }
+
+    const goal = await createGoal(goalData);
     setSaving(false);
 
     if (goal) {
-      setNewGoal({ name: '', hours: '' });
+      setNewGoal({ name: '', hours: '', preferredStart: '', preferredEnd: '', sessionsPerWeek: '' });
       setShowAddGoal(false);
       toast.success('Goal added!');
     } else {
@@ -743,17 +762,51 @@ export function Dashboard() {
                         onChange={(e) => setNewGoal({ ...newGoal, name: e.target.value })}
                       />
                     </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="hours">Hours Per Week</Label>
-                      <Input
-                        id="hours"
-                        type="number"
-                        min="1"
-                        max="40"
-                        placeholder="e.g., 10"
-                        value={newGoal.hours}
-                        onChange={(e) => setNewGoal({ ...newGoal, hours: e.target.value })}
-                      />
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="hours">Hours Per Week</Label>
+                        <Input
+                          id="hours"
+                          type="number"
+                          min="1"
+                          max="40"
+                          placeholder="e.g., 10"
+                          value={newGoal.hours}
+                          onChange={(e) => setNewGoal({ ...newGoal, hours: e.target.value })}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="sessions">Sessions / Week (Optional)</Label>
+                        <Input
+                          id="sessions"
+                          type="number"
+                          min="1"
+                          max="14"
+                          placeholder="e.g., 3"
+                          value={newGoal.sessionsPerWeek}
+                          onChange={(e) => setNewGoal({ ...newGoal, sessionsPerWeek: e.target.value })}
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="preferredStart">Preferred Start (Optional)</Label>
+                        <Input
+                          id="preferredStart"
+                          type="time"
+                          value={newGoal.preferredStart}
+                          onChange={(e) => setNewGoal({ ...newGoal, preferredStart: e.target.value })}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="preferredEnd">Preferred End (Optional)</Label>
+                        <Input
+                          id="preferredEnd"
+                          type="time"
+                          value={newGoal.preferredEnd}
+                          onChange={(e) => setNewGoal({ ...newGoal, preferredEnd: e.target.value })}
+                        />
+                      </div>
                     </div>
                     <Button onClick={handleAddGoal} className="w-full" disabled={saving}>
                       {saving ? (
@@ -795,13 +848,24 @@ export function Dashboard() {
                         <div className={`h-3 w-3 rounded-full ${getGoalColor(index)}`} />
                         <div>
                           <p className="font-medium">{goal.name}</p>
-                          <p className="text-sm text-muted-foreground">
-                            Target: {goal.targetMinutesPerWeek / 60} hours/week
-                          </p>
+                          <div className="flex flex-wrap gap-2 mt-1">
+                            <Badge variant="outline" className="text-xs font-normal">
+                              Target: {goal.targetMinutesPerWeek / 60}h/week
+                            </Badge>
+                            {goal.sessionsPerWeek && (
+                              <Badge variant="secondary" className="text-xs font-normal">
+                                {goal.sessionsPerWeek} sessions/week
+                              </Badge>
+                            )}
+                            {goal.preferredTime && (
+                              <Badge variant="secondary" className="text-xs font-normal">
+                                🕒 {goal.preferredTime.start} - {goal.preferredTime.end}
+                              </Badge>
+                            )}
+                          </div>
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
-                        <Badge variant="secondary">{goal.targetMinutesPerWeek / 60}h/week</Badge>
                         <Button
                           variant="ghost"
                           size="icon"
