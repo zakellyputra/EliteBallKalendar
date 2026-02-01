@@ -8,10 +8,15 @@ import { Send, Bot, User, Sparkles, Calendar, Clock, ChevronDown, ChevronUp, Che
 import { ScrollArea } from '../components/ui/scroll-area';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../components/ui/collapsible';
 import { useAuthContext } from '../components/AuthProvider';
+import { useTheme } from '../components/ThemeProvider';
 import { reschedule, RescheduleResponse, RescheduleOperation } from '../lib/api';
 import { toast } from 'sonner';
 import { VoiceInput } from '../components/VoiceInput';
 import { VoiceOutput } from '../components/VoiceOutput';
+import matchaCup from '../assets/matcha/matcha-cup-104.png';
+import newjeansAi from '../assets/newjeans/newjeans-ai-104.png';
+import marioAi from '../assets/mario/mario-ai-104.png';
+import lebronAi from '../assets/lebron/lebron-ai-104.png';
 
 interface Message {
   id: string;
@@ -39,6 +44,7 @@ const QUICK_PROMPTS = [
 
 export function AIRescheduler() {
   const { isAuthenticated } = useAuthContext();
+  const { colorTheme } = useTheme();
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
@@ -191,8 +197,40 @@ export function AIRescheduler() {
                 <span className="text-blue-500">✦</span> Powered by Gemini
               </Badge>
             </div>
-            <p className="text-muted-foreground">
+            <p className="relative text-muted-foreground">
               Tell me what changed, and I'll help you adjust your schedule in real-time
+              {colorTheme === 'matcha' && (
+                <img
+                  src={matchaCup}
+                  alt=""
+                  aria-hidden="true"
+                  className="pointer-events-none absolute right-0 top-[-66px] h-[104px] w-[104px]"
+                />
+              )}
+              {colorTheme === 'newjeans' && (
+                <img
+                  src={newjeansAi}
+                  alt=""
+                  aria-hidden="true"
+                  className="pointer-events-none absolute right-0 top-[-66px] h-[104px] w-[104px]"
+                />
+              )}
+              {colorTheme === 'mario' && (
+                <img
+                  src={marioAi}
+                  alt=""
+                  aria-hidden="true"
+                  className="pointer-events-none absolute right-0 top-[-66px] h-[104px] w-[104px]"
+                />
+              )}
+              {colorTheme === 'lebron' && (
+                <img
+                  src={lebronAi}
+                  alt=""
+                  aria-hidden="true"
+                  className="pointer-events-none absolute right-0 top-[-66px] h-[180px] w-[120px]"
+                />
+              )}
             </p>
           </div>
 

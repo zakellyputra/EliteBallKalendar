@@ -9,6 +9,7 @@ import { Checkbox } from '../components/ui/checkbox';
 import { CalendarIcon, ClockIcon, TargetIcon, CheckCircle2 } from 'lucide-react';
 import { Progress } from '../components/ui/progress';
 import { toast } from 'sonner';
+import { brandGradient, brandGradientBgHorizontal } from '../lib/theme-utils';
 
 const DAYS_OF_WEEK = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
@@ -62,7 +63,7 @@ export function Onboarding() {
       <div className="container mx-auto px-4 py-16">
         <div className="mx-auto max-w-2xl">
           <div className="mb-8 text-center">
-            <h1 className="mb-2 bg-gradient-to-r from-purple-500 to-blue-500 bg-clip-text text-4xl font-bold text-transparent">
+            <h1 className="mb-2 text-4xl font-bold" style={brandGradient}>
               Welcome to EBK
             </h1>
             <p className="text-muted-foreground">Let's set up your perfect productivity system</p>
@@ -283,7 +284,7 @@ export function Onboarding() {
                 Continue
               </Button>
             ) : (
-              <Button onClick={handleComplete} className="ml-auto bg-gradient-to-r from-purple-500 to-blue-500">
+              <Button onClick={handleComplete} className="ml-auto" style={brandGradientBgHorizontal}>
                 Complete Setup
               </Button>
             )}

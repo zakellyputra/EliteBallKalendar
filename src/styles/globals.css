@@ -39,6 +39,10 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+
+  /* Brand colors for gradients */
+  --brand-primary: #a855f7;
+  --brand-secondary: #3b82f6;
 }
 
 .dark {
@@ -76,6 +80,182 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(0.269 0 0);
   --sidebar-ring: oklch(0.439 0 0);
+}
+
+/* Matcha Theme - Earthy greens and creams */
+.theme-matcha {
+  --brand-primary: #6b8e23;
+  --brand-secondary: #8fbc8f;
+  --chart-1: #6b8e23;
+  --chart-2: #8fbc8f;
+  --chart-3: #9acd32;
+  --chart-4: #3cb371;
+  --chart-5: #2e8b57;
+}
+
+.theme-matcha:not(.dark) {
+  --background: #f5f5dc;
+  --foreground: #2d4a2b;
+  --card: #fdfdf8;
+  --card-foreground: #2d4a2b;
+  --primary: #6b8e23;
+  --primary-foreground: #ffffff;
+  --secondary: #e8f5e9;
+  --secondary-foreground: #2d4a2b;
+  --muted: #e8f0e4;
+  --muted-foreground: #5a7355;
+  --accent: #c8e6c9;
+  --accent-foreground: #2d4a2b;
+  --border: rgba(107, 142, 35, 0.2);
+  --input-background: #fdfdf8;
+}
+
+.theme-matcha.dark {
+  --background: #1a2618;
+  --foreground: #e8f5e9;
+  --card: #243325;
+  --card-foreground: #e8f5e9;
+  --primary: #8fbc8f;
+  --primary-foreground: #1a2618;
+  --secondary: #3d5a3d;
+  --secondary-foreground: #e8f5e9;
+  --muted: #3d5a3d;
+  --muted-foreground: #a5d6a7;
+  --accent: #4a6f4a;
+  --accent-foreground: #e8f5e9;
+  --border: #3d5a3d;
+}
+
+/* NewJeans Theme - Y2K pastels */
+.theme-newjeans {
+  --brand-primary: #b4a7d6;
+  --brand-secondary: #a8d8ea;
+  --chart-1: #b4a7d6;
+  --chart-2: #a8d8ea;
+  --chart-3: #ffaaa5;
+  --chart-4: #ffd3b6;
+  --chart-5: #dcedc1;
+}
+
+.theme-newjeans:not(.dark) {
+  --background: #fef6fb;
+  --foreground: #4a4063;
+  --card: #ffffff;
+  --card-foreground: #4a4063;
+  --primary: #b4a7d6;
+  --primary-foreground: #ffffff;
+  --secondary: #f3e5f5;
+  --secondary-foreground: #4a4063;
+  --muted: #f0e6f6;
+  --muted-foreground: #8b7fa8;
+  --accent: #e1d5f7;
+  --accent-foreground: #4a4063;
+  --border: rgba(180, 167, 214, 0.3);
+  --input-background: #ffffff;
+}
+
+.theme-newjeans.dark {
+  --background: #2d2438;
+  --foreground: #f3e5f5;
+  --card: #3a2f4a;
+  --card-foreground: #f3e5f5;
+  --primary: #d4c5f9;
+  --primary-foreground: #2d2438;
+  --secondary: #4a3d5c;
+  --secondary-foreground: #f3e5f5;
+  --muted: #4a3d5c;
+  --muted-foreground: #c8b8db;
+  --accent: #5c4a70;
+  --accent-foreground: #f3e5f5;
+  --border: #4a3d5c;
+}
+
+/* LeBron Theme - Lakers purple and gold */
+.theme-lebron {
+  --brand-primary: #552583;
+  --brand-secondary: #fdb927;
+  --chart-1: #552583;
+  --chart-2: #fdb927;
+  --chart-3: #8b5cf6;
+  --chart-4: #f59e0b;
+  --chart-5: #a855f7;
+}
+
+.theme-lebron:not(.dark) {
+  --background: #fef9f0;
+  --foreground: #2d1b4e;
+  --card: #ffffff;
+  --card-foreground: #2d1b4e;
+  --primary: #552583;
+  --primary-foreground: #ffffff;
+  --secondary: #fef3c7;
+  --secondary-foreground: #2d1b4e;
+  --muted: #f3e8ff;
+  --muted-foreground: #7c3aed;
+  --accent: #fde68a;
+  --accent-foreground: #2d1b4e;
+  --border: rgba(85, 37, 131, 0.2);
+  --input-background: #ffffff;
+}
+
+.theme-lebron.dark {
+  --background: #1a0d2e;
+  --foreground: #fef3c7;
+  --card: #2d1b4e;
+  --card-foreground: #fef3c7;
+  --primary: #fdb927;
+  --primary-foreground: #1a0d2e;
+  --secondary: #3d2a5c;
+  --secondary-foreground: #fef3c7;
+  --muted: #3d2a5c;
+  --muted-foreground: #dbc78f;
+  --accent: #552583;
+  --accent-foreground: #fef3c7;
+  --border: #3d2a5c;
+}
+
+/* Mario Theme - Vibrant primary colors */
+.theme-mario {
+  --brand-primary: #e60012;
+  --brand-secondary: #0072ce;
+  --chart-1: #e60012;
+  --chart-2: #0072ce;
+  --chart-3: #ffd200;
+  --chart-4: #00a651;
+  --chart-5: #ff6b00;
+}
+
+.theme-mario:not(.dark) {
+  --background: #fffacd;
+  --foreground: #2c2c2c;
+  --card: #ffffff;
+  --card-foreground: #2c2c2c;
+  --primary: #e60012;
+  --primary-foreground: #ffffff;
+  --secondary: #fff5e6;
+  --secondary-foreground: #2c2c2c;
+  --muted: #fff0d1;
+  --muted-foreground: #8b7355;
+  --accent: #ffe4b5;
+  --accent-foreground: #2c2c2c;
+  --border: rgba(230, 0, 18, 0.2);
+  --input-background: #ffffff;
+}
+
+.theme-mario.dark {
+  --background: #1a1a2e;
+  --foreground: #fff5e6;
+  --card: #2a2a3e;
+  --card-foreground: #fff5e6;
+  --primary: #ff4757;
+  --primary-foreground: #ffffff;
+  --secondary: #3a3a4e;
+  --secondary-foreground: #fff5e6;
+  --muted: #3a3a4e;
+  --muted-foreground: #c8b8a0;
+  --accent: #0072ce;
+  --accent-foreground: #ffffff;
+  --border: #3a3a4e;
 }
 
 @theme inline {
