@@ -308,24 +308,65 @@ export function Dashboard() {
       return;
     }
 
-    const blockCount = focusBlocks.length;
+    const blocksToDelete = [...focusBlocks];
+    const totalCount = blocksToDelete.length;
+    const MAX_RETRIES = 3;
+
     setDeletingBlocks(true);
     try {
-      // Delete all focus blocks for the current week
-      await Promise.all(focusBlocks.map(block => calendar.deleteEvent(block.id, block.calendarId)));
+      let remainingBlocks = blocksToDelete;
+      let attempt = 0;
+      let totalSucceeded = 0;
 
-      // Small delay for Google Calendar API eventual consistency
-      await new Promise(resolve => setTimeout(resolve, 500));
+      while (remainingBlocks.length > 0 && attempt < MAX_RETRIES) {
+        attempt++;
 
-      // Clear cache for this week and refresh calendar events
+        const results = await Promise.allSettled(
+          remainingBlocks.map(async (block) => {
+            const result = await calendar.deleteEvent(block.id, block.calendarId);
+            if (result.error) {
+              throw new Error(result.error);
+            }
+            return { block, result };
+          })
+        );
+
+        // Separate successes and failures
+        const succeeded = results.filter(r => r.status === 'fulfilled');
+        const failed = results.filter(r => r.status === 'rejected');
+
+        totalSucceeded += succeeded.length;
+
+        // Get the blocks that failed for retry
+        remainingBlocks = failed.map((failedResult) => {
+          const failedIndex = results.indexOf(failedResult);
+          return remainingBlocks[failedIndex];
+        }).filter(Boolean);
+
+        // If there are failures and we haven't exhausted retries, wait before retry
+        if (remainingBlocks.length > 0 && attempt < MAX_RETRIES) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      }
+
+      // Wait for Google Calendar API eventual consistency
+      await new Promise(resolve => setTimeout(resolve, 750));
+
+      // Clear cache and refresh
       weekCacheRef.current.delete(getWeekCacheKey(weekOffset));
       await fetchCalendarEvents(true);
 
-      toast.success(`Deleted ${blockCount} focus block${blockCount > 1 ? 's' : ''}`);
-      setDeleteDialogOpen(false);
+      // Show result
+      const finalFailed = remainingBlocks.length;
+      if (finalFailed === 0) {
+        toast.success(`Deleted ${totalCount} focus block${totalCount !== 1 ? 's' : ''}`);
+        setDeleteDialogOpen(false);
+      } else {
+        toast.error(`Failed to delete ${finalFailed} block${finalFailed !== 1 ? 's' : ''} after ${MAX_RETRIES} attempts`);
+      }
     } catch (error) {
       console.error('Error deleting blocks:', error);
-      toast.error('Failed to delete some blocks');
+      toast.error('Failed to delete blocks');
     } finally {
       setDeletingBlocks(false);
     }
@@ -345,46 +386,46 @@ export function Dashboard() {
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     setActiveDragBlock(null);
-    
+
     if (!over) return;
-    
+
     // Parse the drop target ID (format: "slot-{day}-{hour}")
     const overId = over.id as string;
     if (!overId.startsWith('slot-')) return;
-    
+
     const [, day, hourStr] = overId.split('-');
     const hour = parseInt(hourStr);
-    
+
     // Get the block index from active id (format: "block-{index}")
     const activeId = active.id as string;
     if (!activeId.startsWith('block-')) return;
-    
+
     const blockIndex = parseInt(activeId.split('-')[1]);
     const block = proposedBlocks[blockIndex];
     if (!block) return;
-    
+
     // Calculate new start/end times
     const { monday } = getWeekDates(weekOffset);
     const dayIndex = DAYS_OF_WEEK.indexOf(day);
     const newDate = new Date(monday);
     newDate.setDate(monday.getDate() + dayIndex);
     newDate.setHours(hour, 0, 0, 0);
-    
+
     const newStart = new Date(newDate);
     const newEnd = new Date(newDate.getTime() + block.duration * 60000);
-    
+
     // Check for overlap with calendar events
     const hasOverlap = calendarEvents.some(event => {
       const eventStart = new Date(event.start);
       const eventEnd = new Date(event.end);
       return newStart < eventEnd && newEnd > eventStart;
     });
-    
+
     if (hasOverlap) {
       toast.error('Cannot place block here - overlaps with existing event');
       return;
     }
-    
+
     // Update the block
     const updatedBlocks = [...proposedBlocks];
     updatedBlocks[blockIndex] = {
@@ -522,12 +563,12 @@ export function Dashboard() {
     const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
       id: `block-${index}`,
     });
-    
+
     const style = transform ? {
       transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
       opacity: isDragging ? 0.5 : 1,
     } : undefined;
-    
+
     return (
       <div
         ref={setNodeRef}
@@ -555,10 +596,10 @@ export function Dashboard() {
     const { setNodeRef, isOver } = useDroppable({
       id: `slot-${day}-${hour}`,
     });
-    
+
     return (
-      <div 
-        ref={setNodeRef} 
+      <div
+        ref={setNodeRef}
         className={`relative min-h-[60px] ${isOver ? 'bg-green-500/20 ring-2 ring-green-500 ring-inset' : ''}`}
       >
         {children}
@@ -985,7 +1026,7 @@ export function Dashboard() {
                               const eventStartMinutes = timeToMinutes(event.start);
                               const eventEndMinutes = timeToMinutes(event.end);
                               const slotMinutes = hour * 60;
-                              
+
                               return (
                                 eventDay === day &&
                                 eventStartMinutes <= slotMinutes &&
@@ -999,7 +1040,7 @@ export function Dashboard() {
                               const blockStartMinutes = timeToMinutes(block.start);
                               const blockEndMinutes = timeToMinutes(block.end);
                               const slotMinutes = hour * 60;
-                              
+
                               return (
                                 blockDay === day &&
                                 blockStartMinutes <= slotMinutes &&
