@@ -7,12 +7,14 @@ import { Badge } from '../components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
-import { Plus, BookOpen, Clock, Zap, Trash2, Loader2, Play, X, Check, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, BookOpen, Clock, Zap, Trash2, Loader2, Play, X, Check, AlertTriangle, ChevronLeft, ChevronRight, GripVertical } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuthContext } from '../components/AuthProvider';
 import { useGoals } from '../hooks/useGoals';
 import { useScheduler } from '../hooks/useScheduler';
-import { calendar, CalendarEvent, Goal } from '../lib/api';
+import { useSettings } from '../hooks/useSettings';
+import { calendar, CalendarEvent, Goal, ProposedBlock } from '../lib/api';
+import { DndContext, DragEndEvent, useDraggable, useDroppable, DragOverlay } from '@dnd-kit/core';
 
 const DAYS_OF_WEEK = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 const COLORS = ['bg-purple-500', 'bg-blue-500', 'bg-pink-500', 'bg-green-500', 'bg-orange-500', 'bg-cyan-500'];
@@ -44,13 +46,18 @@ export function Dashboard() {
   const { 
     proposedBlocks, 
     insufficientTime, 
+    availableMinutes,
+    requestedMinutes,
     loading: schedulerLoading, 
     applying, 
     generate, 
     apply, 
-    clear, 
+    clear,
+    setProposedBlocks,
     hasProposedBlocks 
   } = useScheduler();
+  
+  const { settings } = useSettings();
   
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
   const [eventsLoading, setEventsLoading] = useState(false);
@@ -246,6 +253,142 @@ export function Dashboard() {
   const totalGoalHours = goals.reduce((sum, g) => sum + g.targetMinutesPerWeek / 60, 0);
   const focusBlocks = calendarEvents.filter(e => e.isEliteBall);
 
+  // Drag and drop state
+  const [activeDragBlock, setActiveDragBlock] = useState<ProposedBlock | null>(null);
+
+  // Handle drag end for pending blocks
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    setActiveDragBlock(null);
+    
+    if (!over) return;
+    
+    // Parse the drop target ID (format: "slot-{day}-{hour}")
+    const overId = over.id as string;
+    if (!overId.startsWith('slot-')) return;
+    
+    const [, day, hourStr] = overId.split('-');
+    const hour = parseInt(hourStr);
+    
+    // Get the block index from active id (format: "block-{index}")
+    const activeId = active.id as string;
+    if (!activeId.startsWith('block-')) return;
+    
+    const blockIndex = parseInt(activeId.split('-')[1]);
+    const block = proposedBlocks[blockIndex];
+    if (!block) return;
+    
+    // Calculate new start/end times
+    const { monday } = getWeekDates(weekOffset);
+    const dayIndex = DAYS_OF_WEEK.indexOf(day);
+    const newDate = new Date(monday);
+    newDate.setDate(monday.getDate() + dayIndex);
+    newDate.setHours(hour, 0, 0, 0);
+    
+    const newStart = new Date(newDate);
+    const newEnd = new Date(newDate.getTime() + block.duration * 60000);
+    
+    // Check for overlap with calendar events
+    const hasOverlap = calendarEvents.some(event => {
+      const eventStart = new Date(event.start);
+      const eventEnd = new Date(event.end);
+      return newStart < eventEnd && newEnd > eventStart;
+    });
+    
+    if (hasOverlap) {
+      toast.error('Cannot place block here - overlaps with existing event');
+      return;
+    }
+    
+    // Update the block
+    const updatedBlocks = [...proposedBlocks];
+    updatedBlocks[blockIndex] = {
+      ...block,
+      start: newStart.toISOString(),
+      end: newEnd.toISOString(),
+    };
+    setProposedBlocks(updatedBlocks);
+    toast.success('Block moved successfully');
+  };
+
+  // Calculate working hours range from settings
+  const getWorkingHoursRange = useCallback(() => {
+    if (!settings?.workingWindow) {
+      return { startHour: 9, endHour: 17 }; // Default 9 AM - 5 PM
+    }
+    
+    let earliestStart = 24;
+    let latestEnd = 0;
+    
+    const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+    for (const day of days) {
+      const dayWindow = settings.workingWindow[day];
+      if (dayWindow?.enabled) {
+        const [startH] = dayWindow.start.split(':').map(Number);
+        const [endH] = dayWindow.end.split(':').map(Number);
+        if (startH < earliestStart) earliestStart = startH;
+        if (endH > latestEnd) latestEnd = endH;
+      }
+    }
+    
+    // If no days enabled, use defaults
+    if (earliestStart === 24) earliestStart = 9;
+    if (latestEnd === 0) latestEnd = 17;
+    
+    return { startHour: earliestStart, endHour: latestEnd };
+  }, [settings]);
+
+  const { startHour: workingStartHour, endHour: workingEndHour } = getWorkingHoursRange();
+
+  // Draggable Block Component
+  const DraggableBlock = ({ block, index }: { block: ProposedBlock; index: number }) => {
+    const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+      id: `block-${index}`,
+    });
+    
+    const style = transform ? {
+      transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
+      opacity: isDragging ? 0.5 : 1,
+    } : undefined;
+    
+    return (
+      <div
+        ref={setNodeRef}
+        style={style}
+        className="absolute inset-x-0 rounded-md p-2 bg-green-500/30 border-2 border-dashed border-green-500 cursor-grab active:cursor-grabbing"
+        {...listeners}
+        {...attributes}
+      >
+        <div className="flex items-start gap-1">
+          <GripVertical className="h-3 w-3 text-green-600 flex-shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-medium truncate">{block.goalName}</p>
+            <p className="text-xs opacity-75">
+              {formatTime(block.start)} - {formatTime(block.end)}
+            </p>
+            <span className="text-[10px] text-green-600 dark:text-green-400">Drag to move</span>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Droppable Time Slot Component
+  const DroppableSlot = ({ day, hour, children }: { day: string; hour: number; children: React.ReactNode }) => {
+    const { setNodeRef, isOver } = useDroppable({
+      id: `slot-${day}-${hour}`,
+    });
+    
+    return (
+      <div 
+        ref={setNodeRef} 
+        className={`relative min-h-[60px] ${isOver ? 'bg-green-500/20 ring-2 ring-green-500 ring-inset' : ''}`}
+      >
+        {children}
+      </div>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <Navigation />
@@ -414,7 +557,15 @@ export function Dashboard() {
                     Schedule Generator
                   </CardTitle>
                   <CardDescription>
-                    Automatically fill your free time with focus blocks for your goals
+                    {hasProposedBlocks ? (
+                      <span>
+                        {Math.round(availableMinutes / 60)}h free time available • 
+                        {Math.round(requestedMinutes / 60)}h requested • 
+                        {proposedBlocks.length} blocks generated
+                      </span>
+                    ) : (
+                      'Automatically fill your free time with focus blocks for your goals'
+                    )}
                   </CardDescription>
                 </div>
                 <div className="flex gap-2">
@@ -574,6 +725,13 @@ export function Dashboard() {
                 <p className="text-muted-foreground">Loading calendar...</p>
               </div>
             ) : (
+              <DndContext onDragEnd={handleDragEnd} onDragStart={(event) => {
+                const activeId = event.active.id as string;
+                if (activeId.startsWith('block-')) {
+                  const blockIndex = parseInt(activeId.split('-')[1]);
+                  setActiveDragBlock(proposedBlocks[blockIndex] || null);
+                }
+              }}>
               <div className="overflow-x-auto">
                 <div className="min-w-[800px]">
                   {/* Days Header */}
@@ -601,8 +759,8 @@ export function Dashboard() {
 
                   {/* Time Slots */}
                   <div className="space-y-1">
-                    {Array.from({ length: 12 }, (_, i) => {
-                      const hour = 8 + i;
+                    {Array.from({ length: workingEndHour - workingStartHour }, (_, i) => {
+                      const hour = workingStartHour + i;
                       const timeStr = `${hour.toString().padStart(2, '0')}:00`;
 
                       return (
@@ -640,7 +798,7 @@ export function Dashboard() {
                             });
 
                             return (
-                              <div key={day} className="relative min-h-[60px]">
+                              <DroppableSlot key={day} day={day} hour={hour}>
                                 {/* Existing calendar events */}
                                 {dayEvents.map((event) => (
                                   <div
@@ -658,24 +816,20 @@ export function Dashboard() {
                                   </div>
                                 ))}
 
-                                {/* Proposed blocks (pending - shown with striped pattern) */}
-                                {dayProposedBlocks.map((block, idx) => (
-                                  <div
-                                    key={`proposed-${idx}`}
-                                    className="absolute inset-x-0 rounded-md p-2 bg-green-500/30 border-2 border-dashed border-green-500 animate-pulse"
-                                  >
-                                    <p className="text-xs font-medium truncate">{block.goalName}</p>
-                                    <p className="text-xs opacity-75">
-                                      {formatTime(block.start)} - {formatTime(block.end)}
-                                    </p>
-                                    <span className="text-[10px] text-green-600 dark:text-green-400">Pending</span>
-                                  </div>
-                                ))}
+                                {/* Proposed blocks (pending - draggable) */}
+                                {dayProposedBlocks.map((block) => {
+                                  const blockIndex = proposedBlocks.findIndex(
+                                    b => b.start === block.start && b.goalId === block.goalId
+                                  );
+                                  return (
+                                    <DraggableBlock key={`proposed-${blockIndex}`} block={block} index={blockIndex} />
+                                  );
+                                })}
 
                                 {dayEvents.length === 0 && dayProposedBlocks.length === 0 && (
                                   <div className="h-full rounded-md border border-dashed border-border bg-muted/10" />
                                 )}
-                              </div>
+                              </DroppableSlot>
                             );
                           })}
                         </div>
@@ -684,6 +838,7 @@ export function Dashboard() {
                   </div>
                 </div>
               </div>
+              </DndContext>
             )}
 
             {/* Legend */}
@@ -699,7 +854,7 @@ export function Dashboard() {
               {hasProposedBlocks && (
                 <div className="flex items-center gap-2">
                   <div className="h-3 w-3 rounded-md border-2 border-dashed border-green-500 bg-green-500/30" />
-                  <span className="text-sm text-muted-foreground">Pending (click Apply)</span>
+                  <span className="text-sm text-muted-foreground">Pending - drag to reposition, then Apply</span>
                 </div>
               )}
             </div>

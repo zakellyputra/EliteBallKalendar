@@ -11,6 +11,8 @@ export interface ProposedBlock {
 
 export interface ScheduleResult {
   proposedBlocks: ProposedBlock[];
+  availableMinutes: number; // Total free time in working window
+  requestedMinutes: number; // Total time requested by goals
   insufficientTime?: {
     requested: number;
     available: number;
@@ -119,7 +121,7 @@ export async function generateSchedule(
   });
 
   if (goals.length === 0) {
-    return { proposedBlocks: [] };
+    return { proposedBlocks: [], availableMinutes: 0, requestedMinutes: 0 };
   }
 
   // Fetch user's settings
@@ -228,7 +230,11 @@ export async function generateSchedule(
   // Sort blocks by start time
   proposedBlocks.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
 
-  const result: ScheduleResult = { proposedBlocks };
+  const result: ScheduleResult = { 
+    proposedBlocks,
+    availableMinutes: totalAvailableMinutes,
+    requestedMinutes: totalRequestedMinutes,
+  };
 
   if (unscheduledGoals.length > 0) {
     result.insufficientTime = {

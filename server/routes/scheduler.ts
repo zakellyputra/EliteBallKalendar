@@ -16,6 +16,8 @@ router.post('/generate', requireAuth, async (req: AuthenticatedRequest, res: Res
     
     res.json({
       blocks: result.proposedBlocks,
+      availableMinutes: result.availableMinutes,
+      requestedMinutes: result.requestedMinutes,
       insufficientTime: result.insufficientTime,
     });
   } catch (err: any) {

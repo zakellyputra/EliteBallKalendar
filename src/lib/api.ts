@@ -96,7 +96,12 @@ export const settings = {
 // Scheduler
 export const scheduler = {
   generate: (weekStart?: string, weekEnd?: string) => 
-    request<{ blocks: ProposedBlock[]; insufficientTime?: InsufficientTimeInfo }>('/scheduler/generate', {
+    request<{ 
+      blocks: ProposedBlock[]; 
+      availableMinutes: number;
+      requestedMinutes: number;
+      insufficientTime?: InsufficientTimeInfo;
+    }>('/scheduler/generate', {
       method: 'POST',
       body: JSON.stringify({ weekStart, weekEnd }),
     }),
