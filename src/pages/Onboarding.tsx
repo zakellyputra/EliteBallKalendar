@@ -19,6 +19,7 @@ export function Onboarding() {
   const [preferences, setPreferences] = useState({
     calendarType: '',
     blockLength: '30',
+    breakLength: '10',
     workingDays: [] as string[],
     startTime: '09:00',
     endTime: '17:00',
@@ -151,6 +152,28 @@ export function Onboarding() {
                   </Select>
                 </div>
 
+                <div className="space-y-2">
+                  <Label htmlFor="breakLength">Break Between Blocks (minutes)</Label>
+                  <Select
+                    value={preferences.breakLength}
+                    onValueChange={(value) =>
+                      setPreferences((prev) => ({ ...prev, breakLength: value }))
+                    }
+                  >
+                    <SelectTrigger id="breakLength">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="0">No break</SelectItem>
+                      <SelectItem value="5">5 minutes</SelectItem>
+                      <SelectItem value="10">10 minutes</SelectItem>
+                      <SelectItem value="15">15 minutes</SelectItem>
+                      <SelectItem value="20">20 minutes</SelectItem>
+                      <SelectItem value="30">30 minutes</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
                 <div className="rounded-lg border border-border bg-muted/50 p-4">
                   <p className="mb-2 text-sm font-medium">Why this matters:</p>
                   <p className="text-sm text-muted-foreground">
@@ -246,6 +269,10 @@ export function Onboarding() {
                   <div className="flex items-center justify-between rounded-lg border border-border p-3">
                     <span className="text-sm text-muted-foreground">Work Block</span>
                     <span className="text-sm font-medium">{preferences.blockLength} minutes</span>
+                  </div>
+                  <div className="flex items-center justify-between rounded-lg border border-border p-3">
+                    <span className="text-sm text-muted-foreground">Break Time</span>
+                    <span className="text-sm font-medium">{preferences.breakLength} minutes</span>
                   </div>
                   <div className="flex items-center justify-between rounded-lg border border-border p-3">
                     <span className="text-sm text-muted-foreground">Working Days</span>

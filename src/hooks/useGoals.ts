@@ -46,6 +46,8 @@ export function useGoals() {
           name: data.name,
           targetMinutesPerWeek: data.targetMinutesPerWeek,
           createdAt,
+          preferredTime: data.preferredTime,
+          sessionsPerWeek: data.sessionsPerWeek,
         };
       });
       setState({ goals, loading: false, error: null });
@@ -61,18 +63,26 @@ export function useGoals() {
   const createGoal = useCallback(async (data: CreateGoalInput): Promise<Goal | null> => {
     if (!user) return null;
     try {
-      const docRef = await addDoc(collection(db, 'goals'), {
+      const goalData: any = {
         userId: user.id,
         name: data.name,
         targetMinutesPerWeek: data.targetMinutesPerWeek,
         createdAt: serverTimestamp(),
-      });
+      };
+      
+      if (data.preferredTime) goalData.preferredTime = data.preferredTime;
+      if (data.sessionsPerWeek) goalData.sessionsPerWeek = data.sessionsPerWeek;
+
+      const docRef = await addDoc(collection(db, 'goals'), goalData);
+      
       const goal: Goal = {
         id: docRef.id,
         userId: user.id,
         name: data.name,
         targetMinutesPerWeek: data.targetMinutesPerWeek,
         createdAt: new Date().toISOString(),
+        preferredTime: data.preferredTime,
+        sessionsPerWeek: data.sessionsPerWeek,
       };
       setState(prev => ({
         ...prev,
@@ -92,6 +102,9 @@ export function useGoals() {
       if (data.targetMinutesPerWeek !== undefined) {
         updateData.targetMinutesPerWeek = data.targetMinutesPerWeek;
       }
+      if (data.preferredTime !== undefined) updateData.preferredTime = data.preferredTime;
+      if (data.sessionsPerWeek !== undefined) updateData.sessionsPerWeek = data.sessionsPerWeek;
+
       await updateDoc(doc(db, 'goals', id), updateData);
       setState(prev => ({
         ...prev,

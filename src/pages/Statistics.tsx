@@ -4,11 +4,22 @@ import { Navigation } from '../components/Navigation';
 import { Button } from '../components/ui/button';
 import { Card, CardContent } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
-import { ChevronLeft, ChevronRight, Download, Share2, Trophy, TrendingUp, Clock, Calendar, Zap, Target, Loader2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Download, Share2, Trophy, TrendingUp, Clock, Calendar, Zap, Target, Loader2, Plus, BarChart3 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
 import { useStats } from '../hooks/useStats';
 import { useAuthContext } from '../components/AuthProvider';
+import marioAi from '../assets/mario/mario-ai-104.png';
+import lebronAi from '../assets/lebron/lebron-ai-104.png';
+import newjeansAi from '../assets/newjeans/newjeans-ai-104.png';
+import matchaCup from '../assets/matcha/matcha-cup-104.png';
+
+const PERSONA_IMAGES: Record<string, string> = {
+  'mario-ai-104.png': marioAi,
+  'lebron-ai-104.png': lebronAi,
+  'newjeans-ai-104.png': newjeansAi,
+  'matcha-cup-104.png': matchaCup,
+};
 
 const COLORS = ['#a855f7', '#3b82f6', '#ec4899', '#10b981', '#f97316', '#06b6d4'];
 
@@ -37,6 +48,18 @@ export function Statistics() {
     },
     {
       id: 3,
+      type: 'weekly-trend',
+      title: 'Weekly Trend',
+      subtitle: 'Your productivity week by week',
+    },
+    {
+      id: 4,
+      type: 'weekday-weekend',
+      title: 'Work Balance',
+      subtitle: 'Weekday vs weekend distribution',
+    },
+    {
+      id: 5,
       type: 'blocks',
       title: `${wrapped?.blocksCompleted || 0} Focus Blocks`,
       subtitle: 'completed with dedication',
@@ -44,31 +67,16 @@ export function Statistics() {
       icon: Target,
     },
     {
-      id: 4,
+      id: 6,
       type: 'subjects',
       title: 'Top Focus Areas',
       subtitle: 'Where you spent your time',
     },
     {
-      id: 5,
+      id: 7,
       type: 'productivity',
       title: 'Peak Performance',
       subtitle: 'Your most productive moments',
-    },
-    {
-      id: 6,
-      type: 'reschedules',
-      title: `${wrapped?.rescheduleCount || 0} Reschedules`,
-      subtitle: 'AI helped you adapt on the fly',
-      metric: wrapped?.rescheduleCount || 0,
-      icon: Zap,
-    },
-    {
-      id: 7,
-      type: 'tokens',
-      title: `${(wrapped?.tokensSaved || 0).toLocaleString()} Tokens Saved`,
-      subtitle: 'by Bear1 compression',
-      metric: wrapped?.tokensSaved || 0,
     },
     {
       id: 8,
@@ -78,6 +86,12 @@ export function Statistics() {
     },
     {
       id: 9,
+      type: 'persona',
+      title: wrapped?.persona?.name || 'The Apprentice',
+      subtitle: 'Your Productivity Persona',
+    },
+    {
+      id: 10,
       type: 'forward',
       title: 'Keep Going!',
       subtitle: "Let's make next month even better",
@@ -135,7 +149,6 @@ export function Statistics() {
 
       case 'total-hours':
       case 'blocks':
-      case 'reschedules':
         const Icon = slide.icon!;
         return (
           <div className="flex h-full flex-col items-center justify-center text-center">
@@ -174,41 +187,176 @@ export function Statistics() {
           </div>
         );
 
-      case 'tokens':
+      case 'weekly-trend':
+        const weeklyData = wrapped?.weeklyHours || [];
         return (
-          <div className="flex h-full flex-col items-center justify-center text-center">
+          <div className="flex h-full flex-col items-center justify-center text-center px-8">
             <motion.div
               initial={{ scale: 0 }}
               animate={{ scale: 1 }}
               transition={{ delay: 0.2, type: 'spring' }}
-              className="mb-8 flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-br from-cyan-500 to-blue-500"
+              className="mb-6"
             >
-              <span className="text-4xl">🐻</span>
-            </motion.div>
-            <motion.div
-              initial={{ opacity: 0, scale: 0.5 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: 0.4, type: 'spring' }}
-              className="mb-4 bg-gradient-to-r from-cyan-500 to-blue-500 bg-clip-text text-6xl font-bold text-transparent"
-            >
-              {(slide.metric || 0).toLocaleString()}
+              <BarChart3 className="h-16 w-16 text-purple-500" />
             </motion.div>
             <motion.h2
-              initial={{ opacity: 0, y: 20 }}
+              initial={{ opacity: 0, y: -20 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.6 }}
-              className="mb-2 text-3xl font-bold"
+              className="mb-2 text-5xl font-bold"
             >
-              Tokens Saved
+              {slide.title}
             </motion.h2>
             <motion.p
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              transition={{ delay: 0.8 }}
-              className="text-xl text-muted-foreground"
+              transition={{ delay: 0.2 }}
+              className="mb-8 text-xl text-muted-foreground"
             >
-              by Bear1 context compression
+              {slide.subtitle}
             </motion.p>
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ delay: 0.4 }}
+              className="w-full max-w-2xl h-64"
+            >
+              {weeklyData.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={weeklyData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+                    <XAxis dataKey="label" stroke="rgba(255,255,255,0.6)" tick={{ fill: 'rgba(255,255,255,0.8)' }} />
+                    <YAxis stroke="rgba(255,255,255,0.6)" tick={{ fill: 'rgba(255,255,255,0.8)' }} />
+                    <Tooltip
+                      contentStyle={{ backgroundColor: 'rgba(0,0,0,0.8)', border: 'none', borderRadius: '8px' }}
+                      labelStyle={{ color: 'white' }}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="hours"
+                      stroke="#a855f7"
+                      strokeWidth={3}
+                      dot={{ fill: '#a855f7', strokeWidth: 2, r: 6 }}
+                      activeDot={{ r: 8, fill: '#a855f7' }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              ) : (
+                <p className="text-muted-foreground">No weekly data yet</p>
+              )}
+            </motion.div>
+          </div>
+        );
+
+      case 'weekday-weekend':
+        const split = wrapped?.weekdayWeekendSplit;
+        const sentimentColor = split?.sentiment === 'positive' ? 'text-green-500' :
+          split?.sentiment === 'neutral' ? 'text-yellow-500' : 'text-red-500';
+        const sentimentBg = split?.sentiment === 'positive' ? 'from-green-500' :
+          split?.sentiment === 'neutral' ? 'from-yellow-500' : 'from-red-500';
+        const sentimentMessage = split?.sentiment === 'positive' ? 'Great work balance!' :
+          split?.sentiment === 'neutral' ? 'Balanced schedule' : 'Consider scheduling more during the week';
+
+        return (
+          <div className="flex h-full flex-col items-center justify-center text-center px-8">
+            <motion.h2
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-2 text-5xl font-bold"
+            >
+              {slide.title}
+            </motion.h2>
+            <motion.p
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.2 }}
+              className="mb-8 text-xl text-muted-foreground"
+            >
+              {slide.subtitle}
+            </motion.p>
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ delay: 0.4 }}
+              className="w-full max-w-md"
+            >
+              <div className="mb-6 h-8 overflow-hidden rounded-full bg-muted/30">
+                <motion.div
+                  initial={{ width: 0 }}
+                  animate={{ width: `${split?.weekdayPercent || 0}%` }}
+                  transition={{ delay: 0.6, duration: 1 }}
+                  className={`h-full bg-gradient-to-r ${sentimentBg} to-blue-500`}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-8 mb-6">
+                <div>
+                  <p className="text-4xl font-bold">{split?.weekdayPercent || 0}%</p>
+                  <p className="text-lg text-muted-foreground">Weekday</p>
+                  <p className="text-sm text-muted-foreground">{split?.weekdayHours || 0}h</p>
+                </div>
+                <div>
+                  <p className="text-4xl font-bold">{split?.weekendPercent || 0}%</p>
+                  <p className="text-lg text-muted-foreground">Weekend</p>
+                  <p className="text-sm text-muted-foreground">{split?.weekendHours || 0}h</p>
+                </div>
+              </div>
+              <motion.p
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 1 }}
+                className={`text-xl font-medium ${sentimentColor}`}
+              >
+                {sentimentMessage}
+              </motion.p>
+            </motion.div>
+          </div>
+        );
+
+      case 'persona':
+        const personaImage = wrapped?.persona?.image && PERSONA_IMAGES[wrapped.persona.image] 
+          ? PERSONA_IMAGES[wrapped.persona.image] 
+          : PERSONA_IMAGES['mario-ai-104.png'];
+
+        return (
+          <div className="flex h-full flex-col items-center justify-center text-center px-8">
+            <motion.div
+              initial={{ scale: 0, rotate: -10 }}
+              animate={{ scale: 1, rotate: 0 }}
+              transition={{ delay: 0.2, type: 'spring', stiffness: 260, damping: 20 }}
+              className="mb-8 relative"
+            >
+              <div className="absolute inset-0 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 blur-2xl opacity-50 animate-pulse" />
+              <img 
+                src={personaImage} 
+                alt={wrapped?.persona?.name || 'Persona'} 
+                className="relative h-48 w-48 object-contain drop-shadow-2xl"
+              />
+            </motion.div>
+            <motion.h2
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.4 }}
+              className="mb-2 text-5xl font-bold bg-gradient-to-r from-purple-400 to-pink-600 bg-clip-text text-transparent"
+            >
+              {slide.title}
+            </motion.h2>
+            <motion.p
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.6 }}
+              className="mb-8 text-xl text-muted-foreground"
+            >
+              {slide.subtitle}
+            </motion.p>
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.8 }}
+              className="max-w-xl mx-auto p-6 rounded-2xl bg-white/10 backdrop-blur-sm border border-white/20"
+            >
+              <p className="text-xl leading-relaxed">
+                {wrapped?.persona?.description || 'Start working to discover your persona!'}
+              </p>
+            </motion.div>
           </div>
         );
 
@@ -486,10 +634,11 @@ export function Statistics() {
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-muted-foreground">AI Reschedules</p>
-                    <p className="text-3xl font-bold">{wrapped?.rescheduleCount || 0}</p>
+                    <p className="text-sm text-muted-foreground">Work Balance</p>
+                    <p className="text-3xl font-bold">{wrapped?.weekdayWeekendSplit?.weekdayPercent || 0}%</p>
+                    <p className="text-xs text-muted-foreground">weekday</p>
                   </div>
-                  <Zap className="h-10 w-10 text-pink-500" />
+                  <Calendar className="h-10 w-10 text-green-500" />
                 </div>
               </CardContent>
             </Card>
@@ -497,14 +646,61 @@ export function Statistics() {
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-muted-foreground">Bear1 Savings</p>
-                    <p className="text-3xl font-bold">{((wrapped?.tokensSaved || 0) / 1000).toFixed(1)}k</p>
+                    <p className="text-sm text-muted-foreground">Persona</p>
+                    <p className="text-lg font-bold truncate max-w-[120px]">{wrapped?.persona?.name || 'N/A'}</p>
+                    <p className="text-xs text-muted-foreground">Your style</p>
                   </div>
-                  <span className="text-4xl">🐻</span>
+                  <Zap className="h-10 w-10 text-yellow-500" />
                 </div>
               </CardContent>
             </Card>
           </div>
+
+          {/* Persona Section */}
+          <Card className="mb-6 bg-gradient-to-br from-purple-900/10 to-blue-900/10 border-purple-500/20">
+            <CardContent className="pt-6 flex flex-col md:flex-row items-center gap-6">
+                 <div className="h-32 w-32 flex-shrink-0 relative">
+                    <div className="absolute inset-0 bg-gradient-to-br from-purple-500/20 to-blue-500/20 rounded-full blur-xl" />
+                    <img 
+                        src={wrapped?.persona?.image && PERSONA_IMAGES[wrapped.persona.image] ? PERSONA_IMAGES[wrapped.persona.image] : PERSONA_IMAGES['mario-ai-104.png']} 
+                        alt="Persona" 
+                        className="relative h-full w-full object-contain"
+                    />
+                 </div>
+                 <div className="text-center md:text-left">
+                    <h3 className="text-2xl font-bold mb-2">{wrapped?.persona?.name || 'The Apprentice'}</h3>
+                    <p className="text-muted-foreground text-lg">{wrapped?.persona?.description || 'Start working to discover your persona!'}</p>
+                 </div>
+            </CardContent>
+          </Card>
+
+          {/* Weekly Trend Chart */}
+          <Card className="mb-6">
+            <CardContent className="pt-6">
+              <h3 className="mb-4">Weekly Trend</h3>
+              {(wrapped?.weeklyHours?.length || 0) > 0 ? (
+                <ResponsiveContainer width="100%" height={250}>
+                  <LineChart data={wrapped?.weeklyHours}>
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                    <XAxis dataKey="label" className="text-xs" />
+                    <YAxis className="text-xs" />
+                    <Tooltip />
+                    <Line
+                      type="monotone"
+                      dataKey="hours"
+                      stroke="#a855f7"
+                      strokeWidth={2}
+                      dot={{ fill: '#a855f7', strokeWidth: 2, r: 4 }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex h-[250px] items-center justify-center text-muted-foreground">
+                  No weekly data yet
+                </div>
+              )}
+            </CardContent>
+          </Card>
 
           {/* Charts */}
           <div className="grid gap-6 md:grid-cols-2">
@@ -560,6 +756,8 @@ export function Statistics() {
               </CardContent>
             </Card>
           </div>
+
+
 
           {/* Achievements */}
           <Card className="mt-6">
