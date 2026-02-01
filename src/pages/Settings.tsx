@@ -12,7 +12,7 @@ import { Settings as SettingsIcon, Calendar, Bell, Database, Loader2, RefreshCw,
 import { toast } from 'sonner';
 import { useSettings } from '../hooks/useSettings';
 import { useAuthContext } from '../components/AuthProvider';
-import { WorkingWindow, CalendarInfo, calendar as calendarApi, auth as authApi } from '../lib/api';
+import { WorkingWindow, CalendarInfo, calendar as calendarApi, auth as authApi, settings as settingsApi } from '../lib/api';
 import { useTheme } from '../components/ThemeProvider';
 import { brandGradientBgHorizontal } from '../lib/theme-utils';
 
@@ -62,13 +62,14 @@ const COLOR_THEMES = [
 export function Settings() {
   const { isAuthenticated, user } = useAuthContext();
   const { colorTheme, setColorTheme } = useTheme();
-  const { settings, loading, updateSettings, defaultWorkingWindow } = useSettings();
+  const { settings, loading, updateSettings, defaultWorkingWindow, refresh } = useSettings();
   
   const [workingWindow, setWorkingWindow] = useState<WorkingWindow>(defaultWorkingWindow);
   const [blockLength, setBlockLength] = useState('30');
   const [timezone, setTimezone] = useState('America/New_York');
   const [minGap, setMinGap] = useState('5');
   const [saving, setSaving] = useState(false);
+  const [resettingCalendar, setResettingCalendar] = useState(false);
   
   // Calendar selection state
   const [availableCalendars, setAvailableCalendars] = useState<CalendarInfo[]>([]);
@@ -213,6 +214,33 @@ export function Settings() {
     setTimezone('America/New_York');
     setMinGap('5');
     toast.info('Settings reset to defaults (not saved yet)');
+  };
+
+  const handleResetEbkCalendar = async () => {
+    if (!isAuthenticated) {
+      toast.error('Please sign in to reset the calendar');
+      return;
+    }
+    const confirmed = window.confirm(
+      'This will create a new EBK calendar and stop using the old one. You will need to delete the old calendar manually in Google Calendar. Continue?'
+    );
+    if (!confirmed) return;
+    setResettingCalendar(true);
+    const result = await settingsApi.resetEbkCalendar();
+    setResettingCalendar(false);
+    if (result.error || !result.data?.newCalendar) {
+      const message = result.error?.includes('<!DOCTYPE')
+        ? 'Unexpected server response. Is the API server running?'
+        : (result.error || 'Failed to reset calendar');
+      toast.error(message);
+      return;
+    }
+    await refresh();
+    if (result.data.oldCalendarId) {
+      toast.info('New focus blocks calendar created. Delete the old calendar in Google Calendar to remove old events.');
+    } else {
+      toast.success('New focus blocks calendar created.');
+    }
   };
 
   return (
@@ -539,6 +567,14 @@ export function Settings() {
                 </Button>
                 <Button variant="outline" className="w-full justify-start">
                   Clear Calendar Cache
+                </Button>
+                <Button
+                  variant="outline"
+                  className="w-full justify-start"
+                  onClick={handleResetEbkCalendar}
+                  disabled={resettingCalendar || !isAuthenticated}
+                >
+                  {resettingCalendar ? 'Resetting Focus Blocks Calendar...' : 'Reset Focus Blocks Calendar'}
                 </Button>
                 <Button variant="outline" className="w-full justify-start text-destructive">
                   Delete All Focus Blocks

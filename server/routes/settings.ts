@@ -1,7 +1,7 @@
 import { Router, Response } from 'express';
 import { requireAuth, AuthenticatedRequest } from '../middleware/auth';
 import { firestore } from '../lib/firebase-admin';
-import { renameCalendar } from '../lib/google-calendar';
+import { createEbkCalendar, renameCalendar } from '../lib/google-calendar';
 
 const router = Router();
 
@@ -98,6 +98,39 @@ router.put('/', requireAuth, async (req: AuthenticatedRequest, res: Response) =>
   } catch (err: any) {
     console.error('Error updating settings:', err);
     res.status(500).json({ error: err.message || 'Failed to update settings' });
+  }
+});
+
+// Reset EBK calendar (create a new one and switch settings)
+router.post('/reset-ebk-calendar', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const settingsRef = firestore.collection('settings').doc(req.userId!);
+    const snapshot = await settingsRef.get();
+    const settings = snapshot.exists ? snapshot.data() : null;
+    const ebkCalendarName = settings?.ebkCalendarName || 'EliteBall Focus Blocks';
+    const oldCalendarId = settings?.ebkCalendarId || null;
+
+    const newCalendar = await createEbkCalendar(req.userId!, ebkCalendarName);
+
+    let selectedCalendars = settings?.selectedCalendars ?? null;
+    if (Array.isArray(selectedCalendars)) {
+      selectedCalendars = selectedCalendars.filter(id => id !== oldCalendarId);
+      if (!selectedCalendars.includes(newCalendar.id)) {
+        selectedCalendars.push(newCalendar.id);
+      }
+    }
+
+    await settingsRef.set({
+      userId: req.userId!,
+      ebkCalendarId: newCalendar.id,
+      ebkCalendarName: newCalendar.name,
+      selectedCalendars,
+    }, { merge: true });
+
+    res.json({ newCalendar, oldCalendarId });
+  } catch (err: any) {
+    console.error('Error resetting EBK calendar:', err);
+    res.status(500).json({ error: err.message || 'Failed to reset calendar' });
   }
 });
 
