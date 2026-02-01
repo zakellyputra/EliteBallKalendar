@@ -12,7 +12,7 @@ A calendar-aware weekly scheduler with live AI rescheduler and productivity stat
 
 - **Frontend**: Vite + React 18 + TypeScript + Tailwind CSS + shadcn/ui
 - **Backend**: Express.js + TypeScript
-- **Database**: SQLite + Prisma ORM
+- **Database**: Firebase Auth + Firestore
 - **AI**: Gemini API + Bear1 compression middleware
 - **Voice**: ElevenLabs TTS/STT
 - **Calendar**: Google Calendar API
@@ -43,12 +43,7 @@ A calendar-aware weekly scheduler with live AI rescheduler and productivity stat
    - `ELEVENLABS_API_KEY` from [ElevenLabs](https://elevenlabs.io/)
    - `BEAR1_API_KEY` from Bear1 API
 
-3. **Set up the database**
-   ```bash
-   npm run db:push
-   ```
-
-4. **Start development servers**
+3. **Start development servers**
    ```bash
    npm run dev
    ```
@@ -56,6 +51,19 @@ A calendar-aware weekly scheduler with live AI rescheduler and productivity stat
    This starts:
    - Frontend at http://localhost:3000
    - Backend API at http://localhost:3001
+
+## Docker (Dev)
+
+1. **Ensure Docker is installed**
+
+2. **Start the dev container**
+   ```bash
+   docker compose up --build
+   ```
+
+3. **Open the app**
+   - Frontend: http://localhost:3000
+   - Backend: http://localhost:3001
 
 ### Google OAuth Setup
 
@@ -69,8 +77,6 @@ A calendar-aware weekly scheduler with live AI rescheduler and productivity stat
 ## Project Structure
 
 ```
-├── prisma/
-│   └── schema.prisma      # Database schema
 ├── server/
 │   ├── index.ts           # Express server entry
 │   ├── lib/               # Utility libraries
@@ -90,9 +96,8 @@ A calendar-aware weekly scheduler with live AI rescheduler and productivity stat
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/health` | GET | Health check |
-| `/api/auth/google` | GET | Start Google OAuth |
+| `/api/auth/google/start` | POST | Start calendar OAuth |
 | `/api/auth/google/callback` | GET | OAuth callback |
-| `/api/auth/me` | GET | Get current user |
 | `/api/calendar/events` | GET | List calendar events |
 | `/api/goals` | GET/POST | List/create goals |
 | `/api/goals/:id` | PUT/DELETE | Update/delete goal |
