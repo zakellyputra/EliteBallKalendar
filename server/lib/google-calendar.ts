@@ -194,14 +194,89 @@ export async function listEvents(
   return allEvents;
 }
 
+// Create a new secondary calendar for EBK focus blocks
+export async function createEbkCalendar(
+  userId: string,
+  name: string
+): Promise<{ id: string; name: string }> {
+  const calendar = await getCalendarClient(userId);
+
+  const response = await calendar.calendars.insert({
+    requestBody: {
+      summary: name,
+      description: 'Focus blocks created by EliteBall Kalendar',
+    },
+  });
+
+  // Invalidate cache since we added a new calendar
+  invalidateCalendarListCache(userId);
+
+  return {
+    id: response.data.id!,
+    name: response.data.summary!,
+  };
+}
+
+// Rename an existing calendar
+export async function renameCalendar(
+  userId: string,
+  calendarId: string,
+  newName: string
+): Promise<void> {
+  const calendar = await getCalendarClient(userId);
+
+  await calendar.calendars.patch({
+    calendarId,
+    requestBody: {
+      summary: newName,
+    },
+  });
+
+  // Invalidate cache since we renamed a calendar
+  invalidateCalendarListCache(userId);
+}
+
+// Get or create EBK calendar
+export async function getOrCreateEbkCalendar(
+  userId: string,
+  name: string,
+  existingId?: string | null
+): Promise<{ id: string; name: string; created: boolean }> {
+  const calendar = await getCalendarClient(userId);
+
+  // If we have an existing ID, verify it still exists
+  if (existingId) {
+    try {
+      const response = await calendar.calendars.get({ calendarId: existingId });
+      return {
+        id: response.data.id!,
+        name: response.data.summary!,
+        created: false,
+      };
+    } catch (error: any) {
+      // Calendar doesn't exist anymore, create a new one
+      console.log(`EBK calendar ${existingId} not found, creating new one`);
+    }
+  }
+
+  // Create a new calendar
+  const newCalendar = await createEbkCalendar(userId, name);
+  return {
+    id: newCalendar.id,
+    name: newCalendar.name,
+    created: true,
+  };
+}
+
 export async function createEvent(
   userId: string,
-  input: CreateEventInput
+  input: CreateEventInput,
+  calendarId: string = 'primary'
 ): Promise<CalendarEvent> {
   const calendar = await getCalendarClient(userId);
 
   const response = await calendar.events.insert({
-    calendarId: 'primary',
+    calendarId,
     requestBody: {
       summary: input.title,
       description: input.description,
@@ -217,20 +292,22 @@ export async function createEvent(
   });
 
   const event = response.data;
-  
+
   return {
     id: event.id!,
     title: event.summary || 'Untitled',
     description: event.description || undefined,
     start: event.start?.dateTime || event.start?.date!,
     end: event.end?.dateTime || event.end?.date!,
+    calendarId,
   };
 }
 
 export async function updateEvent(
   userId: string,
   eventId: string,
-  input: Partial<CreateEventInput>
+  input: Partial<CreateEventInput>,
+  calendarId: string = 'primary'
 ): Promise<CalendarEvent> {
   const calendar = await getCalendarClient(userId);
 
@@ -251,27 +328,32 @@ export async function updateEvent(
   }
 
   const response = await calendar.events.patch({
-    calendarId: 'primary',
+    calendarId,
     eventId,
     requestBody: updateBody,
   });
 
   const event = response.data;
-  
+
   return {
     id: event.id!,
     title: event.summary || 'Untitled',
     description: event.description || undefined,
     start: event.start?.dateTime || event.start?.date!,
     end: event.end?.dateTime || event.end?.date!,
+    calendarId,
   };
 }
 
-export async function deleteEvent(userId: string, eventId: string): Promise<void> {
+export async function deleteEvent(
+  userId: string,
+  eventId: string,
+  calendarId: string = 'primary'
+): Promise<void> {
   const calendar = await getCalendarClient(userId);
 
   await calendar.events.delete({
-    calendarId: 'primary',
+    calendarId,
     eventId,
   });
 }

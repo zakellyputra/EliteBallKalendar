@@ -39,6 +39,7 @@ export function Settings() {
   const [selectedCalendars, setSelectedCalendars] = useState<string[] | null>(null);
   const [calendarsLoading, setCalendarsLoading] = useState(false);
   const [connectingCalendar, setConnectingCalendar] = useState(false);
+  const [ebkCalendarName, setEbkCalendarName] = useState('EliteBall Focus Blocks');
 
   // Fetch available calendars when authenticated
   useEffect(() => {
@@ -85,6 +86,9 @@ export function Settings() {
       setTimezone(settings.timezone);
       setMinGap(String(settings.minGapMinutes));
       setSelectedCalendars(settings.selectedCalendars);
+      if (settings.ebkCalendarName) {
+        setEbkCalendarName(settings.ebkCalendarName);
+      }
     }
   }, [settings]);
 
@@ -101,6 +105,7 @@ export function Settings() {
       timezone,
       minGapMinutes: parseInt(minGap),
       selectedCalendars,
+      ebkCalendarName,
     });
     setSaving(false);
     
@@ -226,6 +231,20 @@ export function Settings() {
                 >
                   {connectingCalendar ? 'Connecting...' : 'Connect Google Calendar'}
                 </Button>
+
+                <div className="space-y-2">
+                  <Label htmlFor="ebkCalendarName">Focus Blocks Calendar Name</Label>
+                  <Input
+                    id="ebkCalendarName"
+                    value={ebkCalendarName}
+                    onChange={(e) => setEbkCalendarName(e.target.value)}
+                    placeholder="EliteBall Focus Blocks"
+                    disabled={!isAuthenticated}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Focus blocks will be created in a separate calendar with this name
+                  </p>
+                </div>
 
                 <div className="space-y-2">
                   <Label htmlFor="timezone">Timezone</Label>

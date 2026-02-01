@@ -392,6 +392,98 @@ export function Dashboard() {
 
   const { startHour: workingStartHour, endHour: workingEndHour } = getWorkingHoursRange();
 
+  // Calculate total schedulable time in the week (matching scheduler logic)
+  const calculateFreeTime = useCallback(() => {
+    if (!settings?.workingWindow) {
+      return { totalWorkingMinutes: 0, busyMinutes: 0, freeMinutes: 0 };
+    }
+
+    const { monday } = getWeekDates(weekOffset);
+    const dayNames = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+    const minGapMinutes = settings.minGapMinutes || 5;
+    const blockLengthMinutes = settings.blockLengthMinutes || 30;
+
+    // Collect all free slots
+    const allFreeSlots: { start: Date; end: Date }[] = [];
+
+    // For each day, compute free slots like the scheduler does
+    for (let dayIdx = 0; dayIdx < 7; dayIdx++) {
+      const dayName = dayNames[dayIdx];
+      const dayWindow = settings.workingWindow[dayName];
+
+      if (!dayWindow?.enabled) continue;
+
+      // Get working window for this day
+      const dayDate = new Date(monday);
+      dayDate.setDate(monday.getDate() + dayIdx);
+
+      const [startH, startM] = dayWindow.start.split(':').map(Number);
+      const [endH, endM] = dayWindow.end.split(':').map(Number);
+
+      const windowStart = new Date(dayDate);
+      windowStart.setHours(startH, startM || 0, 0, 0);
+
+      const windowEnd = new Date(dayDate);
+      windowEnd.setHours(endH, endM || 0, 0, 0);
+
+      // Get busy events for this day (include ALL events including focus blocks)
+      // This ensures existing focus blocks reduce available time
+      const dayEvents = calendarEvents
+        .filter(e => {
+          const eventStart = new Date(e.start);
+          const eventEnd = new Date(e.end);
+          // Event overlaps with this day's working window
+          return eventEnd > windowStart && eventStart < windowEnd;
+        })
+        .map(e => ({
+          start: new Date(Math.max(new Date(e.start).getTime(), windowStart.getTime())),
+          end: new Date(Math.min(new Date(e.end).getTime(), windowEnd.getTime())),
+        }))
+        .sort((a, b) => a.start.getTime() - b.start.getTime());
+
+      // Compute free slots for this day
+      let current = new Date(windowStart);
+
+      for (const busy of dayEvents) {
+        if (current < busy.start) {
+          // Free slot before this busy period (minus gap)
+          const gapEnd = new Date(busy.start.getTime() - minGapMinutes * 60 * 1000);
+          if (gapEnd > current) {
+            allFreeSlots.push({ start: new Date(current), end: gapEnd });
+          }
+        }
+        // Move past busy period plus gap
+        const afterBusy = new Date(busy.end.getTime() + minGapMinutes * 60 * 1000);
+        if (afterBusy > current) {
+          current = afterBusy;
+        }
+      }
+
+      // Add remaining time after last busy period
+      if (current < windowEnd) {
+        allFreeSlots.push({ start: current, end: new Date(windowEnd) });
+      }
+    }
+
+    // Calculate schedulable minutes (only counting time that can actually fit blocks)
+    let totalSchedulableMinutes = 0;
+    for (const slot of allFreeSlots) {
+      const slotDuration = (slot.end.getTime() - slot.start.getTime()) / 60000;
+      if (slotDuration >= blockLengthMinutes) {
+        // Calculate how many blocks can fit (accounting for gaps between blocks)
+        const blockWithGap = blockLengthMinutes + minGapMinutes;
+        const numBlocks = Math.floor((slotDuration + minGapMinutes) / blockWithGap);
+        totalSchedulableMinutes += numBlocks * blockLengthMinutes;
+      }
+    }
+
+    return { totalWorkingMinutes: 0, busyMinutes: 0, freeMinutes: Math.max(0, totalSchedulableMinutes) };
+  }, [settings, calendarEvents, weekOffset, getWeekDates]);
+
+  const { freeMinutes } = calculateFreeTime();
+  const freeHours = Math.floor(freeMinutes / 60);
+  const freeRemainingMinutes = Math.round(freeMinutes % 60);
+
   // Draggable Block Component
   const DraggableBlock = ({ block, index }: { block: ProposedBlock; index: number }) => {
     const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
@@ -733,9 +825,16 @@ export function Dashboard() {
           <CardHeader>
             <div className="flex items-center justify-between">
               <div>
-                <CardTitle>Weekly Schedule</CardTitle>
+                <CardTitle className="flex items-center gap-3">
+                  Weekly Schedule
+                  {isAuthenticated && settings?.workingWindow && (
+                    <span className="text-sm font-normal text-green-600 dark:text-green-400">
+                      {freeHours}h {freeRemainingMinutes}m available
+                    </span>
+                  )}
+                </CardTitle>
                 <CardDescription>
-                  {isAuthenticated 
+                  {isAuthenticated
                     ? `${getWeekDateRange()} • ${calendarEvents.length} events`
                     : 'Sign in to see your real calendar events'}
                 </CardDescription>
