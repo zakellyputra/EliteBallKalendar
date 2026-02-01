@@ -1,7 +1,7 @@
 import { Router, Response } from 'express';
 import { requireAuth, AuthenticatedRequest } from '../middleware/auth';
 import { listEvents, createEvent, updateEvent, deleteEvent, getWeekRange, getAvailableCalendars } from '../lib/google-calendar';
-import { prisma } from '../index';
+import { firestore } from '../lib/firebase-admin';
 
 const router = Router();
 
@@ -12,7 +12,12 @@ router.get('/list', requireAuth, async (req: AuthenticatedRequest, res: Response
     res.json({ calendars });
   } catch (err: any) {
     console.error('Error fetching calendar list:', err);
-    res.status(500).json({ error: err.message || 'Failed to fetch calendars' });
+    const message = err.message || 'Failed to fetch calendars';
+    if (message === 'Calendar not connected') {
+      res.status(401).json({ error: message });
+      return;
+    }
+    res.status(500).json({ error: message });
   }
 });
 
@@ -30,19 +35,20 @@ router.get('/events', requireAuth, async (req: AuthenticatedRequest, res: Respon
       : end;
 
     // Get user's selected calendars from settings
-    const settings = await prisma.settings.findUnique({
-      where: { userId: req.userId! },
-    });
-    
-    const selectedCalendars = settings?.selectedCalendars 
-      ? JSON.parse(settings.selectedCalendars) 
-      : null;
+    const settingsDoc = await firestore.collection('settings').doc(req.userId!).get();
+    const settings = settingsDoc.exists ? settingsDoc.data() : null;
+    const selectedCalendars = settings?.selectedCalendars ?? null;
 
     const events = await listEvents(req.userId!, timeMin, timeMax, selectedCalendars);
     res.json({ events });
   } catch (err: any) {
     console.error('Error fetching calendar events:', err);
-    res.status(500).json({ error: err.message || 'Failed to fetch events' });
+    const message = err.message || 'Failed to fetch events';
+    if (message === 'Calendar not connected') {
+      res.status(401).json({ error: message });
+      return;
+    }
+    res.status(500).json({ error: message });
   }
 });
 
@@ -73,6 +79,9 @@ router.post('/events', requireAuth, async (req: AuthenticatedRequest, res: Respo
 router.put('/events/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
+    if (Array.isArray(id)) {
+      return res.status(400).json({ error: 'Invalid event id' });
+    }
     const { title, description, start, end } = req.body;
 
     const event = await updateEvent(req.userId!, id, {
@@ -93,6 +102,9 @@ router.put('/events/:id', requireAuth, async (req: AuthenticatedRequest, res: Re
 router.delete('/events/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
+    if (Array.isArray(id)) {
+      return res.status(400).json({ error: 'Invalid event id' });
+    }
     await deleteEvent(req.userId!, id);
     res.json({ success: true });
   } catch (err: any) {

@@ -45,13 +45,13 @@ const SYSTEM_PROMPT = `You are an AI scheduling assistant for EliteBallKalendar.
 
 You will receive context about the user's:
 - Current schedule (focus blocks and calendar events)
-- Working window settings
+- Working window settings (which days/hours are enabled for focus work)
 - Goals and their target hours
 
 Based on the user's request, you must output ONLY valid JSON with no prose before or after. The JSON must follow this exact schema:
 
 {
-  "intent": "reschedule",
+  "intent": "reschedule" | "confirm_outside_hours",
   "reason": "Brief explanation of what you're doing",
   "operations": [
     {"op": "move", "blockId": "xxx", "from": "ISO_DATE", "to": "ISO_DATE"},
@@ -65,9 +65,13 @@ Rules:
 1. Only output JSON, no other text
 2. Use ISO 8601 format for all dates (e.g., "2026-01-31T14:00:00.000Z")
 3. When moving blocks, ensure the new time doesn't conflict with existing events
-4. When creating blocks, respect the user's working window
+4. If the user wants to move/create blocks OUTSIDE their working window (disabled days or outside hours), DO NOT refuse. Instead:
+   - Set intent to "confirm_outside_hours"
+   - Still include the operations the user requested
+   - In user_message, note that this is outside their normal working hours and ask if they want to proceed
 5. Keep the user_message concise and friendly
-6. If you can't fulfill the request, explain why in user_message and set operations to empty array`;
+6. If you truly can't fulfill the request (e.g., block doesn't exist, time conflict), explain why in user_message and set operations to empty array
+7. IMPORTANT: Look carefully at the FOCUS BLOCKS section in the context - these are the blocks you can move. Match block IDs exactly.`;
 
 export async function generateReschedule(
   userMessage: string,

@@ -1,7 +1,6 @@
+import './env';
 import express from 'express';
 import cors from 'cors';
-import cookieParser from 'cookie-parser';
-import { PrismaClient } from '@prisma/client';
 
 // Import routes
 import authRoutes from './routes/auth';
@@ -16,16 +15,13 @@ import statsRoutes from './routes/stats';
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Initialize Prisma
-export const prisma = new PrismaClient();
-
 // Middleware
 app.use(cors({
   origin: 'http://localhost:3000',
   credentials: true,
+  allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 app.use(express.json());
-app.use(cookieParser());
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -58,6 +54,5 @@ app.listen(PORT, () => {
 
 // Graceful shutdown
 process.on('SIGINT', async () => {
-  await prisma.$disconnect();
   process.exit(0);
 });

@@ -1,3 +1,5 @@
+import { auth as firebaseAuth } from './firebase';
+
 const API_BASE = '/api';
 
 interface ApiResponse<T> {
@@ -5,18 +7,23 @@ interface ApiResponse<T> {
   error?: string;
 }
 
+async function getIdToken(): Promise<string | undefined> {
+  return firebaseAuth.currentUser ? firebaseAuth.currentUser.getIdToken() : undefined;
+}
+
 async function request<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<ApiResponse<T>> {
   try {
+    const token = await getIdToken();
     const response = await fetch(`${API_BASE}${endpoint}`, {
       ...options,
       headers: {
         'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...options.headers,
       },
-      credentials: 'include',
     });
 
     const data = await response.json();
@@ -30,13 +37,6 @@ async function request<T>(
     return { error: err.message || 'Network error' };
   }
 }
-
-// Auth
-export const auth = {
-  me: () => request<{ user: User | null }>('/auth/me'),
-  logout: () => request<{ success: boolean }>('/auth/logout', { method: 'POST' }),
-  loginUrl: () => `${API_BASE}/auth/google`,
-};
 
 // Calendar
 export const calendar = {
@@ -62,6 +62,11 @@ export const calendar = {
     request<{ success: boolean }>(`/calendar/events/${id}`, {
       method: 'DELETE',
     }),
+};
+
+// Server auth helpers
+export const auth = {
+  startCalendarConnect: () => request<{ url: string }>('/auth/google/start', { method: 'POST' }),
 };
 
 // Goals
@@ -128,22 +133,29 @@ export const reschedule = {
 
 // Voice
 export const voice = {
-  stt: (audioBlob: Blob) => {
+  stt: async (audioBlob: Blob) => {
+    const token = await getIdToken();
     const formData = new FormData();
     formData.append('audio', audioBlob);
-    return fetch(`${API_BASE}/voice/stt`, {
+    const response = await fetch(`${API_BASE}/voice/stt`, {
       method: 'POST',
       body: formData,
-      credentials: 'include',
-    }).then(res => res.json());
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+    return response.json();
   },
-  tts: (text: string) =>
-    fetch(`${API_BASE}/voice/tts`, {
+  tts: async (text: string) => {
+    const token = await getIdToken();
+    const response = await fetch(`${API_BASE}/voice/tts`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
       body: JSON.stringify({ text }),
-      credentials: 'include',
-    }).then(res => res.blob()),
+    });
+    return response.blob();
+  },
 };
 
 // Stats
@@ -207,6 +219,8 @@ export interface Settings {
   timezone: string;
   minGapMinutes: number;
   selectedCalendars: string[] | null; // null means all calendars
+  ebkCalendarName?: string;  // Custom name for EBK calendar
+  ebkCalendarId?: string;    // ID of created EBK calendar
 }
 
 export interface WorkingWindow {
@@ -223,6 +237,7 @@ export interface UpdateSettingsInput {
   timezone?: string;
   minGapMinutes?: number;
   selectedCalendars?: string[] | null;
+  ebkCalendarName?: string;
 }
 
 export interface ProposedBlock {

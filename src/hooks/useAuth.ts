@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
-import { auth, User } from '../lib/api';
+import { GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth';
+import { User } from '../lib/api';
+import { auth } from '../lib/firebase';
 
 interface AuthState {
   user: User | null;
@@ -14,28 +16,39 @@ export function useAuth() {
     error: null,
   });
 
-  const checkAuth = useCallback(async () => {
-    setState(prev => ({ ...prev, loading: true, error: null }));
-    
-    const result = await auth.me();
-    
-    if (result.error) {
-      setState({ user: null, loading: false, error: result.error });
-    } else {
-      setState({ user: result.data?.user || null, loading: false, error: null });
-    }
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+      if (!firebaseUser) {
+        setState({ user: null, loading: false, error: null });
+        return;
+      }
+
+      const mappedUser: User = {
+        id: firebaseUser.uid,
+        email: firebaseUser.email || '',
+        name: firebaseUser.displayName,
+        image: firebaseUser.photoURL,
+        createdAt: firebaseUser.metadata.creationTime || new Date().toISOString(),
+      };
+
+      setState({ user: mappedUser, loading: false, error: null });
+    }, (error) => {
+      setState({ user: null, loading: false, error: error.message || 'Auth error' });
+    });
+
+    return () => unsubscribe();
   }, []);
 
-  useEffect(() => {
-    checkAuth();
-  }, [checkAuth]);
-
   const login = useCallback(() => {
-    window.location.href = auth.loginUrl();
+    const provider = new GoogleAuthProvider();
+    setState(prev => ({ ...prev, loading: true, error: null }));
+    signInWithPopup(auth, provider).catch((error) => {
+      setState(prev => ({ ...prev, loading: false, error: error.message || 'Login failed' }));
+    });
   }, []);
 
   const logout = useCallback(async () => {
-    await auth.logout();
+    await signOut(auth);
     setState({ user: null, loading: false, error: null });
   }, []);
 
@@ -46,6 +59,6 @@ export function useAuth() {
     isAuthenticated: !!state.user,
     login,
     logout,
-    refresh: checkAuth,
+    refresh: async () => {},
   };
 }

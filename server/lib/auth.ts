@@ -1,8 +1,7 @@
 import { google } from 'googleapis';
 
 const SCOPES = [
-  'https://www.googleapis.com/auth/calendar.readonly',
-  'https://www.googleapis.com/auth/calendar.events',
+  'https://www.googleapis.com/auth/calendar',  // Full access including create/rename calendars
   'https://www.googleapis.com/auth/userinfo.email',
   'https://www.googleapis.com/auth/userinfo.profile',
 ];
@@ -15,12 +14,13 @@ export function getOAuth2Client() {
   );
 }
 
-export function getAuthUrl(): string {
+export function getAuthUrl(state?: string): string {
   const oauth2Client = getOAuth2Client();
   return oauth2Client.generateAuthUrl({
     access_type: 'offline',
     scope: SCOPES,
     prompt: 'consent', // Force consent screen to get refresh token
+    state,
   });
 }
 

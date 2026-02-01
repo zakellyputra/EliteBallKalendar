@@ -25,6 +25,7 @@ interface Message {
     rawChars: number;
     compressedChars: number;
   };
+  intent?: string;
 }
 
 const QUICK_PROMPTS = [
@@ -104,6 +105,8 @@ export function AIRescheduler() {
       const data = result.data;
       setPendingOperations(data.operations);
 
+      const isOutsideHours = data.intent === 'confirm_outside_hours';
+
       setMessages((prev) => [
         ...prev,
         {
@@ -117,8 +120,11 @@ export function AIRescheduler() {
             rawChars: data.rawContextChars,
             compressedChars: data.compressedChars,
           },
-          suggestions: data.operations.length > 0 
-            ? ['Confirm these changes', 'Show alternative times'] 
+          intent: data.intent,
+          suggestions: data.operations.length > 0
+            ? (isOutsideHours
+                ? ['Yes, proceed anyway', 'Cancel']
+                : ['Confirm these changes', 'Show alternative times'])
             : QUICK_PROMPTS.slice(0, 2),
         },
       ]);
@@ -243,13 +249,28 @@ export function AIRescheduler() {
                         {/* Operations Preview */}
                         {message.operations && message.operations.length > 0 && (
                           <div className="max-w-[80%] space-y-2">
+                            {/* Warning for outside working hours */}
+                            {message.intent === 'confirm_outside_hours' && (
+                              <div className="rounded-lg border border-yellow-500/50 bg-yellow-500/10 p-3">
+                                <p className="text-sm font-medium text-yellow-600 dark:text-yellow-400">
+                                  ⚠️ Outside Working Hours
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                  This will schedule blocks outside your configured working window. Confirm if you want to proceed.
+                                </p>
+                              </div>
+                            )}
                             <p className="text-xs font-medium text-muted-foreground">
                               Proposed changes:
                             </p>
                             {message.operations.map((op, idx) => (
                               <div
                                 key={idx}
-                                className="rounded-lg border border-border bg-card p-3"
+                                className={`rounded-lg border p-3 ${
+                                  message.intent === 'confirm_outside_hours'
+                                    ? 'border-yellow-500/50 bg-yellow-500/5'
+                                    : 'border-border bg-card'
+                                }`}
                               >
                                 <div className="flex items-center justify-between gap-3">
                                   <div className="flex items-center gap-2">
@@ -262,13 +283,16 @@ export function AIRescheduler() {
                                 </div>
                               </div>
                             ))}
-                            
+
                             {/* Apply Button and Voice Output */}
                             <div className="flex gap-2 mt-2">
                               <Button
                                 onClick={handleApplyChanges}
                                 disabled={applyingChanges}
-                                className="bg-green-600 hover:bg-green-700"
+                                className={message.intent === 'confirm_outside_hours'
+                                  ? 'bg-yellow-600 hover:bg-yellow-700'
+                                  : 'bg-green-600 hover:bg-green-700'
+                                }
                               >
                                 {applyingChanges ? (
                                   <>
@@ -278,12 +302,15 @@ export function AIRescheduler() {
                                 ) : (
                                   <>
                                     <Check className="mr-2 h-4 w-4" />
-                                    Apply Changes
+                                    {message.intent === 'confirm_outside_hours'
+                                      ? 'Confirm & Apply Anyway'
+                                      : 'Apply Changes'
+                                    }
                                   </>
                                 )}
                               </Button>
-                              <VoiceOutput 
-                                text={message.content} 
+                              <VoiceOutput
+                                text={message.content}
                                 disabled={!isAuthenticated}
                               />
                             </div>
