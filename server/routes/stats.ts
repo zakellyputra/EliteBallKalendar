@@ -20,10 +20,12 @@ router.get('/', requireAuth, async (req: AuthenticatedRequest, res: Response) =>
     const startIso = startOfMonth.toISOString();
     const endIso = endOfMonth.toISOString();
 
+    // Query for blocks that overlap with the current month
+    // A block overlaps if: start <= endOfMonth AND end >= startOfMonth
     const focusSnapshot = await firestore.collection('focusBlocks')
       .where('userId', '==', req.userId!)
-      .where('start', '>=', startIso)
-      .where('end', '<=', endIso)
+      .where('start', '<=', endIso)
+      .where('end', '>=', startIso)
       .get();
     const focusBlocks = focusSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() })) as any[];
 
@@ -100,10 +102,12 @@ router.get('/wrapped', requireAuth, async (req: AuthenticatedRequest, res: Respo
     // Focus blocks
     const startIso = startOfMonth.toISOString();
     const endIso = endOfMonth.toISOString();
+    // Query for blocks that overlap with the current month
+    // A block overlaps if: start <= endOfMonth AND end >= startOfMonth
     const focusSnapshot = await firestore.collection('focusBlocks')
       .where('userId', '==', req.userId!)
-      .where('start', '>=', startIso)
-      .where('end', '<=', endIso)
+      .where('start', '<=', endIso)
+      .where('end', '>=', startIso)
       .get();
     const focusBlocks = focusSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() })) as any[];
 
@@ -331,6 +335,17 @@ router.get('/wrapped', requireAuth, async (req: AuthenticatedRequest, res: Respo
             };
         }
     }
+
+    // Reschedule logs
+    const rescheduleSnapshot = await firestore.collection('rescheduleLogs')
+      .where('userId', '==', req.userId!)
+      .where('timestamp', '>=', startIso)
+      .where('timestamp', '<=', endIso)
+      .get();
+    const rescheduleLogs = rescheduleSnapshot.docs.map(docSnap => docSnap.data()) as any[];
+
+    const rescheduleCount = rescheduleLogs.length;
+    const recoveredMinutes = rescheduleLogs.reduce((sum, log) => sum + (log.minutesRecovered || 0), 0);
 
     res.json({
       month: new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
