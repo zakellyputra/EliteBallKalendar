@@ -53,18 +53,44 @@ export async function speechToText(audioBuffer: Buffer, mimeType: string = 'audi
   }
 
   try {
-    // ElevenLabs doesn't have native STT, so we'll use their new Scribe model or fall back
-    // For hackathon, we'll use a simple approach with the audio isolation endpoint
-    // or suggest using browser's native SpeechRecognition API as fallback
+    // Determine file extension from mime type
+    let fileExtension = 'webm';
+    if (mimeType.includes('wav')) fileExtension = 'wav';
+    else if (mimeType.includes('mp3')) fileExtension = 'mp3';
+    else if (mimeType.includes('m4a')) fileExtension = 'm4a';
+    else if (mimeType.includes('ogg')) fileExtension = 'ogg';
     
-    // Note: ElevenLabs primarily focuses on TTS. For STT, we can use:
-    // 1. Browser's SpeechRecognition API (free, client-side)
-    // 2. Google Cloud Speech-to-Text
-    // 3. OpenAI Whisper
+    // Create FormData for multipart/form-data upload
+    // In Node.js 18+, FormData and Blob are available globally
+    const formData = new FormData();
     
-    // For hackathon MVP, return null and use browser's native API on frontend
-    console.log('[ElevenLabs] STT not implemented - use browser SpeechRecognition');
-    return null;
+    // Create a Blob from the buffer (Node.js 18+ supports Blob)
+    const blob = new Blob([audioBuffer], { type: mimeType });
+    // Append blob with filename - FormData in Node.js accepts Blob directly
+    formData.append('audio', blob, `audio.${fileExtension}`);
+    formData.append('model_id', 'scribe_v2'); // Use latest Scribe model
+
+    const response = await fetch(
+      `${ELEVENLABS_BASE_URL}/speech-to-text`,
+      {
+        method: 'POST',
+        headers: {
+          'xi-api-key': ELEVENLABS_API_KEY,
+          // Don't set Content-Type header - FormData will set it with boundary
+        },
+        body: formData,
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[ElevenLabs] STT error:', response.status, response.statusText, errorText);
+      return null;
+    }
+
+    const data = await response.json();
+    // ElevenLabs returns { text: "...", language_code: "...", words: [...] }
+    return data.text || null;
   } catch (error) {
     console.error('[ElevenLabs] STT error:', error);
     return null;
