@@ -13,12 +13,22 @@ import marioAi from '../assets/mario/mario-ai-104.png';
 import lebronAi from '../assets/lebron/lebron-ai-104.png';
 import newjeansAi from '../assets/newjeans/newjeans-ai-104.png';
 import matchaCup from '../assets/matcha/matcha-cup-104.png';
+import calendarMonk from '../assets/persona/calendar-monk.png';
+import deadlineDemon from '../assets/persona/deadline-demon.jpg';
+import galaxyBrain from '../assets/persona/galaxy-brain.jpg';
+import midnightGoblin from '../assets/persona/midnight-goblin.png';
+import sunshine from '../assets/persona/sunshine.gif';
 
 const PERSONA_IMAGES: Record<string, string> = {
   'mario-ai-104.png': marioAi,
   'lebron-ai-104.png': lebronAi,
   'newjeans-ai-104.png': newjeansAi,
   'matcha-cup-104.png': matchaCup,
+  'calendar-monk.png': calendarMonk,
+  'deadline-demon.jpg': deadlineDemon,
+  'galaxy-brain.jpg': galaxyBrain,
+  'midnight-goblin.png': midnightGoblin,
+  'sunshine.gif': sunshine,
 };
 
 const COLORS = ['#a855f7', '#3b82f6', '#ec4899', '#10b981', '#f97316', '#06b6d4'];

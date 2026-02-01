@@ -408,67 +408,134 @@ router.get('/wrapped', requireAuth, async (req: AuthenticatedRequest, res: Respo
       achievements.push('Start scheduling focus blocks to earn achievements!');
     }
 
-    // Determine Persona
-    let persona = {
-      name: 'The Apprentice',
-      description: 'You are just getting started on your journey. Greatness awaits!',
-      image: 'mario-ai-104.png'
-    };
-
+    // Determine Persona - Check in priority order (most specific first)
+    // Calculate metrics for persona determination
     const distinctDays = new Set(completedBlocks.map(b => new Date(b.start).toDateString())).size;
     const completionRate = completedBlocks.length > 0 
       ? completedBlocks.length / (completedBlocks.length + skippedBlocks.length)
       : 0;
+    const totalFocusedHours = totalFocusedMinutes / 60;
+    const numGoals = Object.keys(goalBreakdown).length;
     
-    // 1. Time Perfectionist
-    if (completionRate >= 0.95 && completedBlocks.length >= 5) {
-      persona = {
-        name: 'Time Perfectionist',
-        description: 'You stick to your schedule with incredible precision. Nothing slips through the cracks.',
-        image: 'lebron-ai-104.png'
-      };
-    } 
-    // 2. Crammy Jammy
-    else {
-        let nightMinutes = 0;
-        let lastWeekMinutes = 0;
-        const lastWeekStart = new Date(endOfMonth);
-        lastWeekStart.setDate(endOfMonth.getDate() - 7);
-        
-        for (const block of completedBlocks) {
-            const start = new Date(block.start);
-            if (start.getHours() >= 20 || start.getHours() < 4) {
-                nightMinutes += (new Date(block.end).getTime() - start.getTime()) / 60000;
-            }
-            if (start >= lastWeekStart) {
-                lastWeekMinutes += (new Date(block.end).getTime() - start.getTime()) / 60000;
-            }
-        }
-        
-        if (totalFocusedMinutes > 0 && ((nightMinutes / totalFocusedMinutes > 0.3) || (lastWeekMinutes / totalFocusedMinutes > 0.4))) {
-             persona = {
-                name: 'Crammy Jammy',
-                description: 'You thrive under pressure and burn the midnight oil. Deadlines are your fuel.',
-                image: 'newjeans-ai-104.png'
-            };
-        }
-        // 3. Weekend Warrior
-        else if (weekendPercent > 40 && totalFocusedMinutes > 180) {
-             persona = {
-                name: 'Weekend Warrior',
-                description: 'While others rest, you grind. Your weekends are legendary for productivity.',
-                image: 'matcha-cup-104.png'
-            };
-        }
-        // 4. Steady Eddie
-        else if (distinctDays >= 15) {
-             persona = {
-                name: 'Steady Eddie',
-                description: 'Consistency is your middle name. You show up every single day.',
-                image: 'mario-ai-104.png'
-            };
-        }
+    // Calculate time patterns
+    let nightMinutes = 0;
+    let earlyMorningMinutes = 0;
+    let lastWeekMinutes = 0;
+    const lastWeekStart = new Date(endOfMonth);
+    lastWeekStart.setDate(endOfMonth.getDate() - 7);
+    
+    for (const block of completedBlocks) {
+      const start = new Date(block.start);
+      const hour = start.getHours();
+      const blockDuration = (new Date(block.end).getTime() - start.getTime()) / 60000;
+      
+      // Night owl: 8 PM - 4 AM
+      if (hour >= 20 || hour < 4) {
+        nightMinutes += blockDuration;
+      }
+      // Early bird: 5 AM - 7 AM
+      if (hour >= 5 && hour < 7) {
+        earlyMorningMinutes += blockDuration;
+      }
+      // Last week cramming
+      if (start >= lastWeekStart) {
+        lastWeekMinutes += blockDuration;
+      }
     }
+    
+    const nightPercent = totalFocusedMinutes > 0 ? (nightMinutes / totalFocusedMinutes) : 0;
+    const earlyMorningPercent = totalFocusedMinutes > 0 ? (earlyMorningMinutes / totalFocusedMinutes) : 0;
+    const lastWeekPercent = totalFocusedMinutes > 0 ? (lastWeekMinutes / totalFocusedMinutes) : 0;
+    
+    // Calculate average block length
+    const avgBlockLength = completedBlocks.length > 0
+      ? completedBlocks.reduce((sum, b) => sum + (new Date(b.end).getTime() - new Date(b.start).getTime()) / 60000, 0) / completedBlocks.length
+      : 0;
+    
+    // Default persona
+    let persona = {
+      name: 'The Apprentice',
+      description: 'You are just getting started on your journey. Greatness awaits!',
+      image: 'sunshine.gif'
+    };
+    
+    // Persona determination with non-overlapping criteria (checked in priority order)
+    // Each persona has unique criteria that don't overlap with others
+    // Criteria adjusted to be more achievable while remaining distinct
+    
+    // 1. Calendar Monk - Ultra-organized: High completion rate + consistency + many blocks
+    if (completionRate >= 0.85 && distinctDays >= 10 && completedBlocks.length >= 6) {
+      persona = {
+        name: 'Calendar Monk',
+        description: 'Your calendar is a sacred text, and you follow it with monastic devotion. Organization is your religion.',
+        image: 'calendar-monk.png'
+      };
+    }
+    // 2. Deadline Demon - Last-minute pressure worker: High last-week percentage
+    else if (totalFocusedMinutes > 0 && lastWeekPercent > 0.35 && completedBlocks.length >= 2) {
+      persona = {
+        name: 'Deadline Demon',
+        description: 'You dance with deadlines like a demon in the dark. Pressure doesn\'t break you—it powers you.',
+        image: 'deadline-demon.jpg'
+      };
+    }
+    // 3. Galaxy Brain - Diverse interests: Works on many different goals
+    else if (numGoals >= 4 && totalFocusedHours > 2) {
+      persona = {
+        name: 'Galaxy Brain',
+        description: 'Your mind spans galaxies of knowledge. You don\'t just focus—you explore entire universes of goals.',
+        image: 'galaxy-brain.jpg'
+      };
+    }
+    // 4. Midnight Goblin - Night owl: High night work percentage (but not cramming)
+    else if (nightPercent > 0.25 && totalFocusedHours > 1.5 && lastWeekPercent <= 0.35) {
+      persona = {
+        name: 'Midnight Goblin',
+        description: 'When the world sleeps, you come alive. The witching hour is your peak performance time.',
+        image: 'midnight-goblin.png'
+      };
+    }
+    // 5. Sunshine - Early bird: High early morning percentage
+    else if (earlyMorningPercent > 0.20 && totalFocusedHours > 1.5) {
+      persona = {
+        name: 'Sunshine',
+        description: 'You rise with the sun and conquer the day before most people hit snooze. Morning is your superpower.',
+        image: 'sunshine.gif'
+      };
+    }
+    // 6. Weekend Warrior - High weekend percentage + decent total hours
+    else if (weekendPercent > 35 && totalFocusedHours > 2.5) {
+      persona = {
+        name: 'Weekend Warrior',
+        description: 'While others rest, you grind. Your weekends are legendary for productivity.',
+        image: 'calendar-monk.png'
+      };
+    }
+    // 7. Steady Eddie - High consistency (many distinct days) but not Calendar Monk level
+    else if (distinctDays >= 12 && totalFocusedHours > 1.5 && completionRate < 0.85) {
+      persona = {
+        name: 'Steady Eddie',
+        description: 'Consistency is your middle name. You show up every single day, rain or shine.',
+        image: 'calendar-monk.png'
+      };
+    }
+    // 8. Marathon Runner - Long average block length
+    else if (avgBlockLength >= 75 && completedBlocks.length >= 2 && totalFocusedHours > 1.5) {
+      persona = {
+        name: 'Marathon Runner',
+        description: 'You go deep, not wide. Long focused sessions are your superpower—you\'re in it for the long haul.',
+        image: 'galaxy-brain.jpg'
+      };
+    }
+    // 9. Power Hour - High total hours (but doesn't match other specific patterns)
+    else if (totalFocusedHours >= 15) {
+      persona = {
+        name: 'Power Hour',
+        description: 'You put in the hours like a champion. Quantity AND quality? You got both in spades.',
+        image: 'galaxy-brain.jpg'
+      };
+    }
+    // 10. The Apprentice (default) - Already set above
 
     // Reschedule logs
     const rescheduleSnapshot = await firestore.collection('rescheduleLogs')
