@@ -146,12 +146,28 @@ export const reschedule = {
 export const voice = {
   stt: async (audioBlob: Blob) => {
     const token = await getIdToken();
-    const formData = new FormData();
-    formData.append('audio', audioBlob);
+    
+    // Convert blob to base64 for easier backend handling
+    const arrayBuffer = await audioBlob.arrayBuffer();
+    const uint8Array = new Uint8Array(arrayBuffer);
+    // Convert to base64 properly
+    let binary = '';
+    for (let i = 0; i < uint8Array.length; i++) {
+      binary += String.fromCharCode(uint8Array[i]);
+    }
+    const base64 = btoa(binary);
+    const mimeType = audioBlob.type || 'audio/webm';
+    
     const response = await fetch(`${API_BASE}/voice/stt`, {
       method: 'POST',
-      body: formData,
-      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ 
+        audio: base64,
+        mimeType: mimeType,
+      }),
     });
     return response.json();
   },
