@@ -47,8 +47,21 @@ export async function compressContext(text: string): Promise<CompressResponse> {
       originalLength: text.length,
       compressedLength: (data.compressed || text).length,
     };
-  } catch (error) {
-    console.error('[Bear1] Compression error:', error);
+  } catch (error: any) {
+    // Check for network/DNS errors (common in development when service is unavailable)
+    const isNetworkError = 
+      error?.code === 'ENOTFOUND' || 
+      error?.code === 'ECONNREFUSED' ||
+      error?.cause?.code === 'ENOTFOUND' ||
+      error?.cause?.code === 'ECONNREFUSED' ||
+      error?.message?.includes('getaddrinfo ENOTFOUND') ||
+      error?.message?.includes('ECONNREFUSED');
+    
+    // Only log if it's not a network/DNS error (common in development)
+    if (!isNetworkError) {
+      console.error('[Bear1] Compression error:', error);
+    }
+    // Silently fall back to original text for network errors
     // Fall back to original text
     return {
       compressed: text,

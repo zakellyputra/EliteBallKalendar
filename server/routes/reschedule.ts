@@ -5,6 +5,97 @@ import { generateReschedule, RescheduleOperation } from '../lib/gemini';
 import { listEvents, getWeekRange, updateEvent, deleteEvent, createEvent, getOrCreateEbkCalendar } from '../lib/google-calendar';
 import { firestore } from '../lib/firebase-admin';
 
+function parseIsoDate(value?: string): Date {
+  if (!value) {
+    throw new Error('Expected ISO 8601 timestamp');
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    throw new Error('Invalid ISO 8601 timestamp provided by AI');
+  }
+  return date;
+}
+
+// Convert day names or ISO strings to ISO timestamps, ensuring future dates
+function convertToFutureIsoTimestamp(value: string, referenceDate?: Date): string {
+  const now = referenceDate || new Date();
+  const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+  const lowerValue = value.toLowerCase().trim();
+  
+  // Check if it's a day name
+  const dayIndex = dayNames.indexOf(lowerValue);
+  if (dayIndex !== -1) {
+    // Find next occurrence of this day
+    const currentDay = now.getDay();
+    let daysUntil = dayIndex - currentDay;
+    if (daysUntil <= 0) {
+      daysUntil += 7; // Next week
+    }
+    
+    const targetDate = new Date(now);
+    targetDate.setDate(targetDate.getDate() + daysUntil);
+    targetDate.setHours(9, 0, 0, 0); // Default to 9 AM
+    
+    // Ensure it's in the future (add buffer for time of day)
+    if (targetDate <= now) {
+      targetDate.setDate(targetDate.getDate() + 7);
+    }
+    
+    return targetDate.toISOString();
+  }
+  
+  // Try parsing as ISO timestamp
+  try {
+    const date = parseIsoDate(value);
+    // Ensure it's in the future
+    if (date <= now) {
+      throw new Error(`Date ${value} is in the past`);
+    }
+    return date.toISOString();
+  } catch (error) {
+    throw new Error(`Cannot convert "${value}" to a future ISO timestamp: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+// Convert and validate operations, ensuring all dates are in the future
+function convertOperations(operations: RescheduleOperation[]): RescheduleOperation[] {
+  const now = new Date();
+  const converted: RescheduleOperation[] = [];
+  
+  for (const op of operations) {
+    const convertedOp: RescheduleOperation = { ...op };
+    
+    if (op.op === 'move') {
+      // For "from", just validate it's a valid ISO timestamp (don't require it to be future)
+      if (op.from) {
+        try {
+          const fromDate = parseIsoDate(op.from);
+          convertedOp.from = fromDate.toISOString();
+        } catch (error) {
+          // If from is invalid, we can still proceed - it's just metadata
+          console.warn(`[Reschedule] Invalid "from" timestamp: ${op.from}`, error);
+        }
+      }
+      
+      // For "to", ensure it's a future date
+      if (op.to) {
+        convertedOp.to = convertToFutureIsoTimestamp(op.to, now);
+      }
+    } else if (op.op === 'create') {
+      if (op.start) {
+        convertedOp.start = convertToFutureIsoTimestamp(op.start, now);
+      }
+      if (op.end) {
+        convertedOp.end = convertToFutureIsoTimestamp(op.end, now);
+      }
+    }
+    
+    converted.push(convertedOp);
+  }
+  
+  return converted;
+}
+
 const router = Router();
 
 // Build context string for AI
@@ -117,10 +208,13 @@ router.post('/apply', requireAuth, async (req: AuthenticatedRequest, res: Respon
       return res.status(400).json({ error: 'Operations array is required' });
     }
 
+    // Convert operations to ensure all dates are valid ISO timestamps in the future
+    const convertedOperations = convertOperations(operations);
+
     let blocksMovedCount = 0;
     let minutesRecovered = 0;
 
-    for (const op of operations) {
+    for (const op of convertedOperations) {
       switch (op.op) {
         case 'move':
           if (op.blockId && op.to) {
@@ -130,10 +224,18 @@ router.post('/apply', requireAuth, async (req: AuthenticatedRequest, res: Respon
             const block = blockSnap.exists ? blockSnap.data() : null;
 
             if (block && block.userId === req.userId! && block.calendarEventId) {
-              // Calculate duration
+              // Parse source/destination
+              const toDate = parseIsoDate(op.to);
+              // Calculate duration from original block
               const duration = new Date(block.end).getTime() - new Date(block.start).getTime();
-              const newStart = new Date(op.to);
-              const newEnd = new Date(newStart.getTime() + duration);
+              const newStart = toDate; // Fix: use toDate instead of undefined newStart
+              const newEnd = new Date(toDate.getTime() + duration);
+
+              // Validate the new date is in the future
+              const now = new Date();
+              if (newStart <= now) {
+                throw new Error(`Cannot move block to past date: ${op.to}`);
+              }
 
               // Update calendar event using stored calendarId (or primary as fallback)
               const calendarId = block.calendarId || 'primary';
@@ -158,6 +260,19 @@ router.post('/apply', requireAuth, async (req: AuthenticatedRequest, res: Respon
 
         case 'create':
           if (op.goalName && op.start && op.end) {
+            // Validate dates are in the future
+            const startDate = parseIsoDate(op.start);
+            const endDate = parseIsoDate(op.end);
+            const now = new Date();
+            
+            if (startDate <= now || endDate <= now) {
+              throw new Error(`Cannot create block in the past: start=${op.start}, end=${op.end}`);
+            }
+            
+            if (endDate <= startDate) {
+              throw new Error(`End date must be after start date: start=${op.start}, end=${op.end}`);
+            }
+
             // Find the goal
             const goalSnapshot = await firestore.collection('goals')
               .where('userId', '==', req.userId!)
@@ -191,8 +306,8 @@ router.post('/apply', requireAuth, async (req: AuthenticatedRequest, res: Respon
               const calendarEvent = await createEvent(req.userId!, {
                 title: `Focus Block: ${op.goalName}`,
                 description: `eliteball=true\ngoalId=${goal.id}\nblockId=pending`,
-                start: op.start,
-                end: op.end,
+                start: startDate.toISOString(),
+                end: endDate.toISOString(),
               }, calendarId);
 
               // Create focus block in database with calendarId
@@ -248,7 +363,7 @@ router.post('/apply', requireAuth, async (req: AuthenticatedRequest, res: Respon
 
     res.json({
       success: true,
-      applied: operations.length,
+      applied: convertedOperations.length,
       blocksMovedCount,
       minutesRecovered: Math.round(minutesRecovered),
     });

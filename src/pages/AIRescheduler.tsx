@@ -140,15 +140,22 @@ export function AIRescheduler() {
   };
 
   const handleApplyChanges = async () => {
-    if (pendingOperations.length === 0) return;
+    if (pendingOperations.length === 0) {
+      toast.error('No changes to apply. Please make a reschedule request first.');
+      return;
+    }
 
     setApplyingChanges(true);
-    const result = await reschedule.apply(pendingOperations);
+    // Find the reason from the last assistant message
+    const lastMessage = messages[messages.length - 1];
+    const reason = lastMessage?.rawJson ? JSON.parse(lastMessage.rawJson).reason : 'User confirmed changes';
+    const result = await reschedule.apply(pendingOperations, reason);
 
     if (result.error) {
       toast.error(`Failed to apply changes: ${result.error}`);
     } else if (result.data) {
-      toast.success(`Applied ${result.data.applied} changes to your calendar!`);
+      const data = result.data;
+      toast.success(`Applied ${data.applied} changes to your calendar!`);
       setPendingOperations([]);
       
       setMessages((prev) => [
@@ -156,7 +163,7 @@ export function AIRescheduler() {
         {
           id: (Date.now() + 1).toString(),
           role: 'assistant',
-          content: `Done! I've applied ${result.data.applied} changes to your calendar. ${result.data.blocksMovedCount} blocks were moved, recovering ${result.data.minutesRecovered} minutes of focus time.`,
+          content: `Done! I've applied ${data.applied} changes to your calendar. ${data.blocksMovedCount || 0} blocks were moved, recovering ${data.minutesRecovered || 0} minutes of focus time.`,
           timestamp: new Date(),
           suggestions: ['Show me my updated schedule', 'Make another change'],
         },
@@ -392,17 +399,43 @@ export function AIRescheduler() {
                         {/* Suggestions */}
                         {message.suggestions && (
                           <div className="flex flex-wrap gap-2">
-                            {message.suggestions.map((suggestion, idx) => (
-                              <Button
-                                key={idx}
-                                variant="outline"
-                                size="sm"
-                                className="text-xs"
-                                onClick={() => handleSend(suggestion)}
-                              >
-                                {suggestion}
-                              </Button>
-                            ))}
+                            {message.suggestions.map((suggestion, idx) => {
+                              // Handle action buttons differently from regular suggestions
+                              const isActionButton = 
+                                suggestion === 'Confirm these changes' || 
+                                suggestion === 'Yes, proceed anyway' ||
+                                suggestion === 'Confirm & Apply Anyway';
+                              
+                              return (
+                                <Button
+                                  key={idx}
+                                  variant="outline"
+                                  size="sm"
+                                  className="text-xs"
+                                  onClick={() => {
+                                    if (isActionButton && pendingOperations.length > 0) {
+                                      handleApplyChanges();
+                                    } else if (suggestion === 'Cancel') {
+                                      setPendingOperations([]);
+                                      setMessages((prev) => [
+                                        ...prev,
+                                        {
+                                          id: Date.now().toString(),
+                                          role: 'assistant',
+                                          content: 'Cancelled. What would you like to do instead?',
+                                          timestamp: new Date(),
+                                          suggestions: QUICK_PROMPTS.slice(0, 2),
+                                        },
+                                      ]);
+                                    } else {
+                                      handleSend(suggestion);
+                                    }
+                                  }}
+                                >
+                                  {suggestion}
+                                </Button>
+                              );
+                            })}
                           </div>
                         )}
 
