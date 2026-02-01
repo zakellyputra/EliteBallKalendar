@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Navigation } from '../components/Navigation';
 import { Button } from '../components/ui/button';
 import { Card, CardContent } from '../components/ui/card';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Badge } from '../components/ui/badge';
 import { ChevronLeft, ChevronRight, Download, Share2, Trophy, TrendingUp, Clock, Calendar, Zap, Target, Loader2, Plus, BarChart3 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -10,7 +11,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { useStats } from '../hooks/useStats';
 import { useAuthContext } from '../components/AuthProvider';
 import marioAi from '../assets/mario/mario-ai-104.png';
-import lebronAi from '../assets/lebron/sunshine.gif';
+import lebronAi from '../assets/personas/sunshine.gif';
 import newjeansAi from '../assets/newjeans/newjeans-ai-104.png';
 import matchaCup from '../assets/matcha/matcha-cup-104.png';
 
@@ -26,7 +27,7 @@ const COLORS = ['#a855f7', '#3b82f6', '#ec4899', '#10b981', '#f97316', '#06b6d4'
 export function Statistics() {
   const navigate = useNavigate();
   const { isAuthenticated } = useAuthContext();
-  const { wrapped, loading, error } = useStats();
+  const { wrapped, loading, error, selectedMonth, selectedYear, setSelectedMonth, setSelectedYear, availableMonths } = useStats();
   const [currentSlide, setCurrentSlide] = useState(0);
   const [viewMode, setViewMode] = useState<'story' | 'summary'>('story');
 
@@ -335,7 +336,13 @@ export function Statistics() {
               initial={{ opacity: 0, y: -20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.4 }}
-              className="mb-2 text-5xl font-bold bg-gradient-to-r from-purple-400 to-pink-600 bg-clip-text text-transparent"
+              className="mb-2 text-5xl font-bold text-purple-400"
+              style={{
+                background: 'linear-gradient(to right, #c084fc, #db2777)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                backgroundClip: 'text',
+              }}
             >
               {slide.title}
             </motion.h2>
@@ -559,6 +566,40 @@ export function Statistics() {
     );
   }
 
+  // No data available - show empty state
+  if (availableMonths.length === 0) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Navigation />
+        <div className="container mx-auto px-4 pt-24 pb-12">
+          <div className="mb-6">
+            <Button
+              variant="ghost"
+              className="-ml-2"
+              onClick={() => navigate('/')}
+            >
+              <ChevronLeft className="mr-2 h-4 w-4" />
+              Back to Dashboard
+            </Button>
+          </div>
+          <Card className="max-w-lg mx-auto">
+            <CardContent className="pt-6 text-center">
+              <BarChart3 className="mx-auto h-16 w-16 text-muted-foreground mb-4" />
+              <h2 className="text-2xl font-bold mb-2">No Statistics Yet</h2>
+              <p className="text-muted-foreground mb-6">
+                Start scheduling focus blocks to see your productivity stats here.
+              </p>
+              <Button onClick={() => navigate('/')}>
+                <Plus className="mr-2 h-4 w-4" />
+                Schedule Your First Block
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
+
   if (viewMode === 'summary') {
     const goalData = wrapped?.goalBreakdown || [];
     
@@ -577,9 +618,34 @@ export function Statistics() {
             </Button>
           </div>
           <div className="mb-6 flex items-center justify-between">
-            <div>
-              <h1>{wrapped?.month || 'This Month'} Statistics</h1>
-              <p className="text-muted-foreground">Your complete productivity overview</p>
+            <div className="flex items-center gap-4">
+              <div>
+                <h1>{wrapped?.month || 'This Month'} Statistics</h1>
+                <p className="text-muted-foreground">Your complete productivity overview</p>
+              </div>
+              {availableMonths.length > 0 ? (
+                <Select
+                  value={selectedMonth && selectedYear ? `${selectedMonth}-${selectedYear}` : undefined}
+                  onValueChange={(val) => {
+                    const [m, y] = val.split('-').map(Number);
+                    setSelectedMonth(m);
+                    setSelectedYear(y);
+                  }}
+                >
+                  <SelectTrigger className="w-[200px]">
+                    <SelectValue placeholder="Select month" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableMonths.map((opt) => (
+                      <SelectItem key={`${opt.month}-${opt.year}`} value={`${opt.month}-${opt.year}`}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Badge variant="secondary">No data available</Badge>
+              )}
             </div>
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => setViewMode('story')}>

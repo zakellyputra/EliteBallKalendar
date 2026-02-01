@@ -171,9 +171,30 @@ export const voice = {
 
 // Stats
 export const stats = {
-  get: () => request<StatsData>('/stats'),
-  wrapped: () => request<WrappedData>('/stats/wrapped'),
+  get: (month?: number, year?: number) => {
+    const params = new URLSearchParams();
+    if (month) params.set('month', month.toString());
+    if (year) params.set('year', year.toString());
+    const query = params.toString();
+    return request<StatsData>(`/stats${query ? `?${query}` : ''}`);
+  },
+  wrapped: (month?: number, year?: number) => {
+    const params = new URLSearchParams();
+    if (month) params.set('month', month.toString());
+    if (year) params.set('year', year.toString());
+    const query = params.toString();
+    return request<WrappedData>(`/stats/wrapped${query ? `?${query}` : ''}`);
+  },
+  availableMonths: () =>
+    request<{ availableMonths: AvailableMonth[] }>('/stats/available-months'),
 };
+
+export interface AvailableMonth {
+  month: number;
+  year: number;
+  label: string;
+  blockCount: number;
+}
 
 // Types
 export interface User {

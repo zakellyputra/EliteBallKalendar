@@ -8,15 +8,13 @@ const router = Router();
 // Get productivity stats
 router.get('/', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    // Get focus blocks for this month
-    const startOfMonth = new Date();
-    startOfMonth.setDate(1);
-    startOfMonth.setHours(0, 0, 0, 0);
-    
-    const endOfMonth = new Date();
-    endOfMonth.setMonth(endOfMonth.getMonth() + 1);
-    endOfMonth.setDate(0);
-    endOfMonth.setHours(23, 59, 59, 999);
+    // Parse month/year from query, default to current
+    const now = new Date();
+    const month = req.query.month ? parseInt(req.query.month as string) : now.getMonth() + 1;
+    const year = req.query.year ? parseInt(req.query.year as string) : now.getFullYear();
+
+    const startOfMonth = new Date(year, month - 1, 1, 0, 0, 0, 0);
+    const endOfMonth = new Date(year, month, 0, 23, 59, 59, 999);
 
     const startIso = startOfMonth.toISOString();
     const endIso = endOfMonth.toISOString();
@@ -108,14 +106,13 @@ router.get('/', requireAuth, async (req: AuthenticatedRequest, res: Response) =>
 // Get wrapped data (enhanced stats for story mode)
 router.get('/wrapped', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const startOfMonth = new Date();
-    startOfMonth.setDate(1);
-    startOfMonth.setHours(0, 0, 0, 0);
+    // Parse month/year from query, default to current
+    const now = new Date();
+    const month = req.query.month ? parseInt(req.query.month as string) : now.getMonth() + 1;
+    const year = req.query.year ? parseInt(req.query.year as string) : now.getFullYear();
 
-    const endOfMonth = new Date();
-    endOfMonth.setMonth(endOfMonth.getMonth() + 1);
-    endOfMonth.setDate(0);
-    endOfMonth.setHours(23, 59, 59, 999);
+    const startOfMonth = new Date(year, month - 1, 1, 0, 0, 0, 0);
+    const endOfMonth = new Date(year, month, 0, 23, 59, 59, 999);
 
     // Get user settings for calendar filtering
     const startIso = startOfMonth.toISOString();
@@ -383,7 +380,7 @@ router.get('/wrapped', requireAuth, async (req: AuthenticatedRequest, res: Respo
     }
 
     res.json({
-      month: new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
+      month: new Date(year, month - 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
       totalFocusedHours: Math.round(totalFocusedMinutes / 60 * 10) / 10,
       blocksCompleted: completedBlocks.length,
       blocksSkipped: skippedBlocks.length,
@@ -406,6 +403,51 @@ router.get('/wrapped', requireAuth, async (req: AuthenticatedRequest, res: Respo
   } catch (err: any) {
     console.error('Error fetching wrapped data:', err);
     res.status(500).json({ error: err.message || 'Failed to fetch wrapped data' });
+  }
+});
+
+// Get available months with data
+router.get('/available-months', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const settingsDoc = await firestore.collection('settings').doc(req.userId!).get();
+    const settings = settingsDoc.data() || {};
+    const selectedCalendars = settings.selectedCalendars as string[] | undefined;
+    const ebkCalendarId = settings.ebkCalendarId as string | undefined;
+
+    const now = new Date();
+    const availableMonths: { month: number; year: number; label: string; blockCount: number }[] = [];
+
+    // Query each month individually (same approach as working /stats/wrapped endpoint)
+    // This avoids Google Calendar API pagination/limits when querying large date ranges
+    for (let i = 0; i < 12; i++) {
+      const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const startOfMonth = new Date(date.getFullYear(), date.getMonth(), 1, 0, 0, 0, 0);
+      const endOfMonth = new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59, 999);
+
+      const events = await listEvents(
+        req.userId!,
+        startOfMonth,
+        endOfMonth,
+        selectedCalendars,
+        ebkCalendarId
+      );
+
+      const count = events.filter(e => e.isEliteBall).length;
+
+      if (count > 0) {
+        availableMonths.push({
+          month: date.getMonth() + 1,
+          year: date.getFullYear(),
+          label: date.toLocaleString('default', { month: 'long', year: 'numeric' }),
+          blockCount: count,
+        });
+      }
+    }
+
+    res.json({ availableMonths });
+  } catch (err: any) {
+    console.error('Error fetching available months:', err);
+    res.status(500).json({ error: err.message || 'Failed to fetch available months' });
   }
 });
 
