@@ -1,6 +1,67 @@
 import { CalendarEvent, listEvents, createEvent, getWeekRange, getOrCreateEbkCalendar } from './google-calendar';
 import { firestore } from './firebase-admin';
 
+// Get date components in a specific timezone
+function getDateInTimezone(date: Date, timezone: string): { year: number; month: number; day: number; hours: number; minutes: number; dayOfWeek: number } {
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: 'numeric',
+    weekday: 'short',
+    hour12: false,
+  });
+  const parts = formatter.formatToParts(date);
+  const get = (type: string) => parseInt(parts.find(p => p.type === type)?.value || '0');
+  const weekdayStr = parts.find(p => p.type === 'weekday')?.value || 'Mon';
+  const dayMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  return {
+    year: get('year'),
+    month: get('month') - 1,
+    day: get('day'),
+    hours: get('hour'),
+    minutes: get('minute'),
+    dayOfWeek: dayMap[weekdayStr] ?? 1,
+  };
+}
+
+// Create a Date for a specific time in a timezone
+function createDateInTimezone(year: number, month: number, day: number, hours: number, minutes: number, timezone: string): Date {
+  // Create a date string and parse it with the timezone
+  const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}T${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`;
+  // Use Intl to find the offset for this timezone at this time
+  const testDate = new Date(dateStr + 'Z');
+
+  // Binary search to find the correct UTC time that corresponds to our local time
+  let low = testDate.getTime() - 14 * 60 * 60 * 1000; // UTC-14
+  let high = testDate.getTime() + 14 * 60 * 60 * 1000; // UTC+14
+
+  for (let i = 0; i < 20; i++) {
+    const mid = Math.floor((low + high) / 2);
+    const midDate = new Date(mid);
+    const inTz = getDateInTimezone(midDate, timezone);
+
+    if (inTz.hours === hours && inTz.minutes === minutes && inTz.day === day) {
+      return midDate;
+    }
+
+    // Compare as minutes since midnight
+    const targetMinutes = hours * 60 + minutes;
+    const midMinutes = inTz.hours * 60 + inTz.minutes;
+    const dayDiff = inTz.day - day;
+
+    if (dayDiff > 0 || (dayDiff === 0 && midMinutes > targetMinutes)) {
+      high = mid;
+    } else {
+      low = mid;
+    }
+  }
+
+  return new Date(Math.floor((low + high) / 2));
+}
+
 export interface ProposedBlock {
   goalId: string;
   goalName: string;
@@ -40,10 +101,14 @@ function timeToMinutes(time: string): number {
 // Get working window for a specific day
 function getWorkingWindowForDay(
   date: Date,
-  workingWindow: Record<string, WorkingWindowDay>
+  workingWindow: Record<string, WorkingWindowDay>,
+  timezone: string
 ): TimeSlot | null {
   const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-  const dayName = dayNames[date.getDay()];
+
+  // Get the day of week in the user's timezone
+  const dateInTz = getDateInTimezone(date, timezone);
+  const dayName = dayNames[dateInTz.dayOfWeek];
   const dayWindow = workingWindow[dayName];
 
   if (!dayWindow || !dayWindow.enabled) {
@@ -53,11 +118,18 @@ function getWorkingWindowForDay(
   const startMinutes = timeToMinutes(dayWindow.start);
   const endMinutes = timeToMinutes(dayWindow.end);
 
-  const start = new Date(date);
-  start.setHours(Math.floor(startMinutes / 60), startMinutes % 60, 0, 0);
+  // Create start/end times in the user's timezone
+  const start = createDateInTimezone(
+    dateInTz.year, dateInTz.month, dateInTz.day,
+    Math.floor(startMinutes / 60), startMinutes % 60,
+    timezone
+  );
 
-  const end = new Date(date);
-  end.setHours(Math.floor(endMinutes / 60), endMinutes % 60, 0, 0);
+  const end = createDateInTimezone(
+    dateInTz.year, dateInTz.month, dateInTz.day,
+    Math.floor(endMinutes / 60), endMinutes % 60,
+    timezone
+  );
 
   return { start, end };
 }
@@ -137,6 +209,7 @@ export async function generateSchedule(
   const blockLengthMinutes = settings.blockLengthMinutes as number;
   const minGapMinutes = settings.minGapMinutes as number;
   const selectedCalendars = settings.selectedCalendars as string[] | null;
+  const timezone = (settings.timezone as string) || 'America/New_York';
 
   // Fetch calendar events for the week (use provided dates or default to current week)
   const { start: defaultStart, end: defaultEnd } = getWeekRange();
@@ -152,7 +225,7 @@ export async function generateSchedule(
   const allFreeSlots: TimeSlot[] = [];
   
   for (let day = new Date(actualWeekStart); day < actualWeekEnd; day.setDate(day.getDate() + 1)) {
-    const dayWindow = getWorkingWindowForDay(day, workingWindow);
+    const dayWindow = getWorkingWindowForDay(day, workingWindow, timezone);
     if (dayWindow) {
       const dayFreeSlots = computeFreeSlots(
         dayWindow.start,
@@ -285,6 +358,21 @@ export async function applySchedule(
   }
 
   for (const block of blocks) {
+    // Check for existing block with same time slot and goal (only active statuses)
+    const existingBlocks = await firestore.collection('focusBlocks')
+      .where('userId', '==', userId)
+      .where('goalId', '==', block.goalId)
+      .where('start', '==', block.start)
+      .where('end', '==', block.end)
+      .where('status', 'in', ['scheduled', 'moved'])
+      .get();
+
+    if (!existingBlocks.empty) {
+      // Skip this block - already exists with active status
+      console.log(`Skipping duplicate block for goal ${block.goalId} at ${block.start}`);
+      continue;
+    }
+
     // Create calendar event in the EBK calendar
     const calendarEvent = await createEvent(userId, {
       title: `Focus Block: ${block.goalName}`,

@@ -206,18 +206,7 @@ router.post('/apply', requireAuth, async (req: AuthenticatedRequest, res: Respon
                 status: 'scheduled',
                 createdAt: new Date().toISOString(),
               });
-              
-              // Create focus block in database
-              await firestore.collection('focusBlocks').add({
-                userId: req.userId!,
-                goalId: goal.id,
-                start: op.start,
-                end: op.end,
-                calendarEventId: calendarEvent.id,
-                status: 'scheduled',
-                createdAt: new Date().toISOString(),
-              });
-              
+
               const duration = (new Date(op.end).getTime() - new Date(op.start).getTime()) / 60000;
               minutesRecovered += duration;
             }

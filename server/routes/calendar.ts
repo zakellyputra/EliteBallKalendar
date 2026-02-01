@@ -38,8 +38,9 @@ router.get('/events', requireAuth, async (req: AuthenticatedRequest, res: Respon
     const settingsDoc = await firestore.collection('settings').doc(req.userId!).get();
     const settings = settingsDoc.exists ? settingsDoc.data() : null;
     const selectedCalendars = settings?.selectedCalendars ?? null;
+    const ebkCalendarId = settings?.ebkCalendarId ?? null;
 
-    const events = await listEvents(req.userId!, timeMin, timeMax, selectedCalendars);
+    const events = await listEvents(req.userId!, timeMin, timeMax, selectedCalendars, ebkCalendarId);
     res.json({ events });
   } catch (err: any) {
     console.error('Error fetching calendar events:', err);
@@ -105,7 +106,20 @@ router.delete('/events/:id', requireAuth, async (req: AuthenticatedRequest, res:
     if (Array.isArray(id)) {
       return res.status(400).json({ error: 'Invalid event id' });
     }
-    await deleteEvent(req.userId!, id);
+    const { calendarId } = req.body || {};
+    await deleteEvent(req.userId!, id, calendarId || 'primary');
+
+    // Mark associated focusBlock as deleted
+    const focusBlocksSnapshot = await firestore.collection('focusBlocks')
+      .where('userId', '==', req.userId!)
+      .where('calendarEventId', '==', id)
+      .get();
+
+    const updatePromises = focusBlocksSnapshot.docs.map(doc =>
+      doc.ref.update({ status: 'deleted' })
+    );
+    await Promise.all(updatePromises);
+
     res.json({ success: true });
   } catch (err: any) {
     console.error('Error deleting calendar event:', err);

@@ -302,11 +302,44 @@ export function Dashboard() {
   const goToNextWeek = () => setWeekOffset(prev => prev + 1);
   const goToCurrentWeek = () => setWeekOffset(0);
 
+  const handleDeleteAllBlocks = async () => {
+    if (focusBlocks.length === 0) {
+      toast.info('No focus blocks to delete');
+      return;
+    }
+
+    const blockCount = focusBlocks.length;
+    setDeletingBlocks(true);
+    try {
+      // Delete all focus blocks for the current week
+      await Promise.all(focusBlocks.map(block => calendar.deleteEvent(block.id, block.calendarId)));
+
+      // Small delay for Google Calendar API eventual consistency
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Clear cache for this week and refresh calendar events
+      weekCacheRef.current.delete(getWeekCacheKey(weekOffset));
+      await fetchCalendarEvents(true);
+
+      toast.success(`Deleted ${blockCount} focus block${blockCount > 1 ? 's' : ''}`);
+      setDeleteDialogOpen(false);
+    } catch (error) {
+      console.error('Error deleting blocks:', error);
+      toast.error('Failed to delete some blocks');
+    } finally {
+      setDeletingBlocks(false);
+    }
+  };
+
   const totalGoalHours = goals.reduce((sum, g) => sum + g.targetMinutesPerWeek / 60, 0);
   const focusBlocks = calendarEvents.filter(e => e.isEliteBall);
 
   // Drag and drop state
   const [activeDragBlock, setActiveDragBlock] = useState<ProposedBlock | null>(null);
+
+  // Delete all blocks state
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deletingBlocks, setDeletingBlocks] = useState(false);
 
   // Handle drag end for pending blocks
   const handleDragEnd = (event: DragEndEvent) => {
@@ -837,6 +870,37 @@ export function Dashboard() {
                 </CardDescription>
               </div>
               <div className="flex items-center gap-2">
+                <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+                  <DialogTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      disabled={eventsLoading || focusBlocks.length === 0}
+                      title="Delete all focus blocks"
+                      className="border-destructive text-destructive hover:bg-destructive/10 hover:text-destructive"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Delete All Focus Blocks?</DialogTitle>
+                      <DialogDescription>
+                        This will delete {focusBlocks.length} focus block{focusBlocks.length !== 1 ? 's' : ''} from this week.
+                        This action cannot be undone.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="flex justify-end gap-2 pt-4">
+                      <Button variant="outline" onClick={() => setDeleteDialogOpen(false)} disabled={deletingBlocks}>
+                        Cancel
+                      </Button>
+                      <Button variant="destructive" onClick={handleDeleteAllBlocks} disabled={deletingBlocks}>
+                        {deletingBlocks ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                        Delete All
+                      </Button>
+                    </div>
+                  </DialogContent>
+                </Dialog>
                 <Button
                   variant="outline"
                   size="icon"
@@ -845,16 +909,14 @@ export function Dashboard() {
                 >
                   <ChevronLeft className="h-4 w-4" />
                 </Button>
-                {weekOffset !== 0 && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={goToCurrentWeek}
-                    disabled={eventsLoading}
-                  >
-                    Today
-                  </Button>
-                )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={goToCurrentWeek}
+                  disabled={eventsLoading || weekOffset === 0}
+                >
+                  Today
+                </Button>
                 <Button
                   variant="outline"
                   size="icon"

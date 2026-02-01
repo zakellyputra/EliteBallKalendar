@@ -58,9 +58,10 @@ export const calendar = {
       method: 'PUT',
       body: JSON.stringify(event),
     }),
-  deleteEvent: (id: string) =>
+  deleteEvent: (id: string, calendarId?: string) =>
     request<{ success: boolean }>(`/calendar/events/${id}`, {
       method: 'DELETE',
+      body: JSON.stringify({ calendarId }),
     }),
 };
 
