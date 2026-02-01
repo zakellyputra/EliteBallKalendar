@@ -153,11 +153,13 @@ async function buildContext(userId: string): Promise<string> {
   }
   
   context += `\n=== FOCUS BLOCKS (${start.toLocaleDateString()} to ${end.toLocaleDateString()}) ===\n`;
+  context += `Total focus blocks available: ${focusBlocks.length}\n`;
   for (const block of focusBlocks) {
     const goal = goalsById.get(block.goalId) as any;
     const goalName = goal?.name || 'Unknown';
     context += `- [${block.id}] ${goalName}: ${block.start} to ${block.end} (status: ${block.status})\n`;
   }
+  context += `\nIMPORTANT: When the user asks to reschedule "all blocks", "my blocks", "multiple blocks", or uses plural language, you MUST include a move operation for EVERY matching block listed above. Do not stop at just one block.\n`;
 
   context += `\n=== OTHER CALENDAR EVENTS (${start.toLocaleDateString()} to ${end.toLocaleDateString()}) ===\n`;
   const nonFocusEvents = events.filter(e => !e.isEliteBall);

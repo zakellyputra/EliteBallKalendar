@@ -76,7 +76,8 @@ Rules:
 7. If you truly can't fulfill the request (e.g., block doesn't exist, time conflict, or requested date is in the past), explain why in user_message and set operations to empty array
 8. IMPORTANT: Look carefully at the FOCUS BLOCKS section in the context - these are the blocks you can move. Match block IDs exactly.
 9. When providing "from" and "to" fields for move operations, both must be valid ISO 8601 timestamps. The "from" should match the block's current start time, and "to" must be a future date/time.
-10. CRITICAL: If you have many operations, prioritize completing the JSON structure. It's better to return fewer complete operations than many incomplete ones. Always close all brackets and braces properly.`;
+10. CRITICAL: If the user asks to reschedule "all blocks", "my blocks", "multiple blocks", or refers to blocks in plural, you MUST include operations for ALL matching blocks in the operations array. Do not stop at just one block - include move operations for every block that matches the user's request.
+11. CRITICAL: If you have many operations, prioritize completing the JSON structure. It's better to return fewer complete operations than many incomplete ones. Always close all brackets and braces properly.`;
 
 export async function generateReschedule(
   userMessage: string,
@@ -282,6 +283,9 @@ export async function generateReschedule(
       throw new Error('Invalid response structure from Gemini');
     }
 
+    // Log how many operations were returned
+    console.log(`[Gemini] Parsed ${parsed.operations.length} operation(s) from response`);
+
     for (const op of parsed.operations) {
       if (op.op === 'move' && (!op.to || !op.blockId)) {
         throw new Error('Invalid move operation returned by Gemini');
@@ -392,15 +396,24 @@ async function callGemini(body: Record<string, unknown>) {
       const errorText = await response.text();
       lastError = `Gemini API error ${response.status} (${apiBase}/${normalizedModel}): ${errorText}`;
 
-      if (response.status !== 404) {
-        console.error('[Gemini] API error:', lastError);
-        throw new Error(lastError);
+      // 404 means model not found - try next model/base
+      // 503 means service unavailable - try next model/base (might be temporary)
+      // 429 means rate limit - try next model/base (different model might have different quota)
+      // Other errors (400, 500, etc.) - log and try next model/base
+      if (response.status === 404 || response.status === 503 || response.status === 429) {
+        console.warn(`[Gemini] ${response.status === 404 ? 'Model not found' : response.status === 503 ? 'Service unavailable' : 'Rate limited'}, trying next option...`);
+        continue; // Try next model/base
       }
+      
+      // For other errors (400, 500, etc.), log and continue trying other options
+      console.error('[Gemini] API error (will try other models/bases):', lastError);
+      continue; // Try next model/base instead of throwing immediately
     }
   }
 
-  console.error('[Gemini] API error:', lastError);
-  throw new Error(lastError || 'Gemini API error: 404');
+  // If we've tried all models and bases, throw the last error
+  console.error('[Gemini] All API attempts failed. Last error:', lastError);
+  throw new Error(lastError || 'Gemini API error: All models and API bases failed');
 }
 
 async function resolveModels(): Promise<string[]> {
