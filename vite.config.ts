@@ -55,7 +55,8 @@ export default defineConfig({
   },
   server: {
     port: 3000,
-    open: true,
+    host: '0.0.0.0', // Bind to all interfaces so it's accessible from Docker
+    open: false, // Disable auto-open browser (causes errors in Docker)
     proxy: {
       '/api': {
         target: 'http://localhost:3001',
