@@ -1,6 +1,7 @@
 import { Router, Response } from 'express';
 import { requireAuth, AuthenticatedRequest } from '../middleware/auth';
 import { firestore } from '../lib/firebase-admin';
+import { listEvents } from '../lib/google-calendar';
 
 const router = Router();
 
@@ -20,12 +21,31 @@ router.get('/', requireAuth, async (req: AuthenticatedRequest, res: Response) =>
     const startIso = startOfMonth.toISOString();
     const endIso = endOfMonth.toISOString();
 
-    const focusSnapshot = await firestore.collection('focusBlocks')
-      .where('userId', '==', req.userId!)
-      .where('start', '>=', startIso)
-      .where('end', '<=', endIso)
-      .get();
-    const focusBlocks = focusSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() })) as any[];
+    // Get user settings for calendar filtering
+    const settingsDoc = await firestore.collection('settings').doc(req.userId!).get();
+    const settings = settingsDoc.data() || {};
+    const selectedCalendars = settings.selectedCalendars as string[] | undefined;
+    const ebkCalendarId = settings.ebkCalendarId as string | undefined;
+
+    // Fetch events from Google Calendar instead of Firestore
+    const allEvents = await listEvents(
+      req.userId!,
+      startOfMonth,
+      endOfMonth,
+      selectedCalendars,
+      ebkCalendarId
+    );
+
+    // Filter for EBK focus blocks
+    const focusBlocks = allEvents
+      .filter(e => e.isEliteBall)
+      .map(e => ({
+        id: e.id,
+        start: e.start,
+        end: e.end,
+        goalId: e.goalId || '',
+        status: 'scheduled', // Treat all calendar events as "scheduled"
+      }));
 
     const goalSnapshot = await firestore.collection('goals')
       .where('userId', '==', req.userId!)
@@ -97,15 +117,34 @@ router.get('/wrapped', requireAuth, async (req: AuthenticatedRequest, res: Respo
     endOfMonth.setDate(0);
     endOfMonth.setHours(23, 59, 59, 999);
 
-    // Focus blocks
+    // Get user settings for calendar filtering
     const startIso = startOfMonth.toISOString();
     const endIso = endOfMonth.toISOString();
-    const focusSnapshot = await firestore.collection('focusBlocks')
-      .where('userId', '==', req.userId!)
-      .where('start', '>=', startIso)
-      .where('end', '<=', endIso)
-      .get();
-    const focusBlocks = focusSnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() })) as any[];
+
+    const settingsDoc = await firestore.collection('settings').doc(req.userId!).get();
+    const settings = settingsDoc.data() || {};
+    const selectedCalendars = settings.selectedCalendars as string[] | undefined;
+    const ebkCalendarId = settings.ebkCalendarId as string | undefined;
+
+    // Fetch events from Google Calendar instead of Firestore
+    const allEvents = await listEvents(
+      req.userId!,
+      startOfMonth,
+      endOfMonth,
+      selectedCalendars,
+      ebkCalendarId
+    );
+
+    // Filter for EBK focus blocks
+    const focusBlocks = allEvents
+      .filter(e => e.isEliteBall)
+      .map(e => ({
+        id: e.id,
+        start: e.start,
+        end: e.end,
+        goalId: e.goalId || '',
+        status: 'scheduled', // Treat all calendar events as "scheduled"
+      }));
 
     const goalSnapshot = await firestore.collection('goals')
       .where('userId', '==', req.userId!)
@@ -132,6 +171,17 @@ router.get('/wrapped', requireAuth, async (req: AuthenticatedRequest, res: Respo
       }
       goalBreakdown[goalId].minutes += (new Date(block.end).getTime() - new Date(block.start).getTime()) / 60000;
     }
+
+    // Reschedule logs
+    const rescheduleSnapshot = await firestore.collection('rescheduleLogs')
+      .where('userId', '==', req.userId!)
+      .where('timestamp', '>=', startIso)
+      .where('timestamp', '<=', endIso)
+      .get();
+    const rescheduleLogs = rescheduleSnapshot.docs.map(docSnap => docSnap.data()) as any[];
+
+    const rescheduleCount = rescheduleLogs.length;
+    const recoveredMinutes = rescheduleLogs.reduce((sum, log) => sum + (log.minutesRecovered || 0), 0);
 
     // Find peak productivity day and hour
     const dayCount: Record<string, number> = {};

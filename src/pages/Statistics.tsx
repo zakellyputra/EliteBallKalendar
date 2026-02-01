@@ -10,7 +10,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { useStats } from '../hooks/useStats';
 import { useAuthContext } from '../components/AuthProvider';
 import marioAi from '../assets/mario/mario-ai-104.png';
-import lebronAi from '../assets/lebron/lebron-ai-104.png';
+import lebronAi from '../assets/lebron/sunshine.gif';
 import newjeansAi from '../assets/newjeans/newjeans-ai-104.png';
 import matchaCup from '../assets/matcha/matcha-cup-104.png';
 
@@ -328,7 +328,7 @@ export function Statistics() {
               <img 
                 src={personaImage} 
                 alt={wrapped?.persona?.name || 'Persona'} 
-                className="relative h-48 w-48 object-contain drop-shadow-2xl"
+                className="relative h-72 w-72 object-contain drop-shadow-2xl"
               />
             </motion.div>
             <motion.h2
@@ -659,7 +659,7 @@ export function Statistics() {
           {/* Persona Section */}
           <Card className="mb-6 bg-gradient-to-br from-purple-900/10 to-blue-900/10 border-purple-500/20">
             <CardContent className="pt-6 flex flex-col md:flex-row items-center gap-6">
-                 <div className="h-32 w-32 flex-shrink-0 relative">
+                 <div className="h-48 w-48 flex-shrink-0 relative">
                     <div className="absolute inset-0 bg-gradient-to-br from-purple-500/20 to-blue-500/20 rounded-full blur-xl" />
                     <img 
                         src={wrapped?.persona?.image && PERSONA_IMAGES[wrapped.persona.image] ? PERSONA_IMAGES[wrapped.persona.image] : PERSONA_IMAGES['mario-ai-104.png']} 
