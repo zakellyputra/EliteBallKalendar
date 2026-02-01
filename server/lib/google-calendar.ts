@@ -2,6 +2,44 @@ import { google, calendar_v3 } from 'googleapis';
 import { getOAuth2Client, refreshAccessToken } from './auth';
 import { prisma } from '../index';
 
+export interface CalendarInfo {
+  id: string;
+  name: string;
+}
+
+// In-memory cache for calendar lists (per user)
+interface CacheEntry<T> {
+  data: T;
+  expiry: number;
+}
+
+const calendarListCache = new Map<string, CacheEntry<CalendarInfo[]>>();
+const CALENDAR_LIST_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+function getCachedCalendarList(userId: string): CalendarInfo[] | null {
+  const entry = calendarListCache.get(userId);
+  if (entry && Date.now() < entry.expiry) {
+    return entry.data;
+  }
+  // Clear expired entry
+  if (entry) {
+    calendarListCache.delete(userId);
+  }
+  return null;
+}
+
+function setCachedCalendarList(userId: string, calendars: CalendarInfo[]): void {
+  calendarListCache.set(userId, {
+    data: calendars,
+    expiry: Date.now() + CALENDAR_LIST_CACHE_TTL,
+  });
+}
+
+// Export function to invalidate cache (e.g., when user updates calendar selection)
+export function invalidateCalendarListCache(userId: string): void {
+  calendarListCache.delete(userId);
+}
+
 export interface CalendarEvent {
   id: string;
   title: string;
@@ -58,11 +96,6 @@ async function getCalendarClient(userId: string): Promise<calendar_v3.Calendar> 
   return google.calendar({ version: 'v3', auth: oauth2Client });
 }
 
-export interface CalendarInfo {
-  id: string;
-  name: string;
-}
-
 async function listCalendarsInternal(calendar: calendar_v3.Calendar): Promise<CalendarInfo[]> {
   const response = await calendar.calendarList.list();
   const calendars = response.data.items || [];
@@ -75,10 +108,21 @@ async function listCalendarsInternal(calendar: calendar_v3.Calendar): Promise<Ca
     .filter(cal => cal.id);
 }
 
-// Public function to get available calendars for a user
+// Public function to get available calendars for a user (with caching)
 export async function getAvailableCalendars(userId: string): Promise<CalendarInfo[]> {
+  // Check cache first
+  const cached = getCachedCalendarList(userId);
+  if (cached) {
+    return cached;
+  }
+  
   const calendar = await getCalendarClient(userId);
-  return listCalendarsInternal(calendar);
+  const calendars = await listCalendarsInternal(calendar);
+  
+  // Cache the result
+  setCachedCalendarList(userId, calendars);
+  
+  return calendars;
 }
 
 export async function listEvents(
@@ -89,8 +133,12 @@ export async function listEvents(
 ): Promise<CalendarEvent[]> {
   const calendar = await getCalendarClient(userId);
 
-  // Get all calendars the user has access to
-  let calendars = await listCalendarsInternal(calendar);
+  // Get all calendars (uses cache if available)
+  let calendars = getCachedCalendarList(userId);
+  if (!calendars) {
+    calendars = await listCalendarsInternal(calendar);
+    setCachedCalendarList(userId, calendars);
+  }
   
   // Filter to only selected calendars if specified
   if (selectedCalendarIds && selectedCalendarIds.length > 0) {

@@ -107,7 +107,11 @@ function computeFreeSlots(
 }
 
 // Main scheduling algorithm
-export async function generateSchedule(userId: string): Promise<ScheduleResult> {
+export async function generateSchedule(
+  userId: string,
+  weekStart?: Date,
+  weekEnd?: Date
+): Promise<ScheduleResult> {
   // Fetch user's goals
   const goals = await prisma.goal.findMany({
     where: { userId },
@@ -131,9 +135,11 @@ export async function generateSchedule(userId: string): Promise<ScheduleResult> 
   const blockLengthMinutes = settings.blockLengthMinutes;
   const minGapMinutes = settings.minGapMinutes;
 
-  // Fetch calendar events for the week
-  const { start: weekStart, end: weekEnd } = getWeekRange();
-  const calendarEvents = await listEvents(userId, weekStart, weekEnd);
+  // Fetch calendar events for the week (use provided dates or default to current week)
+  const { start: defaultStart, end: defaultEnd } = getWeekRange();
+  const actualWeekStart = weekStart || defaultStart;
+  const actualWeekEnd = weekEnd || defaultEnd;
+  const calendarEvents = await listEvents(userId, actualWeekStart, actualWeekEnd);
 
   // Filter out existing focus blocks
   const busyEvents = calendarEvents.filter(e => !e.isEliteBall);
@@ -142,7 +148,7 @@ export async function generateSchedule(userId: string): Promise<ScheduleResult> 
   // Collect all free slots for the week
   const allFreeSlots: TimeSlot[] = [];
   
-  for (let day = new Date(weekStart); day < weekEnd; day.setDate(day.getDate() + 1)) {
+  for (let day = new Date(actualWeekStart); day < actualWeekEnd; day.setDate(day.getDate() + 1)) {
     const dayWindow = getWorkingWindowForDay(day, workingWindow);
     if (dayWindow) {
       const dayFreeSlots = computeFreeSlots(

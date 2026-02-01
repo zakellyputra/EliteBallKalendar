@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import { Navigation } from '../components/Navigation';
 import { Button } from '../components/ui/button';
@@ -7,7 +7,7 @@ import { Badge } from '../components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
-import { Plus, BookOpen, Clock, Zap, Trash2, Loader2, Play, X, Check, AlertTriangle } from 'lucide-react';
+import { Plus, BookOpen, Clock, Zap, Trash2, Loader2, Play, X, Check, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuthContext } from '../components/AuthProvider';
 import { useGoals } from '../hooks/useGoals';
@@ -16,6 +16,26 @@ import { calendar, CalendarEvent, Goal } from '../lib/api';
 
 const DAYS_OF_WEEK = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 const COLORS = ['bg-purple-500', 'bg-blue-500', 'bg-pink-500', 'bg-green-500', 'bg-orange-500', 'bg-cyan-500'];
+
+// Generate a cache key for a week offset
+function getWeekCacheKey(offset: number): string {
+  const now = new Date();
+  const dayOfWeek = now.getDay();
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1) + (offset * 7));
+  // Use ISO week format: YYYY-Www
+  const year = monday.getFullYear();
+  const weekNum = getISOWeek(monday);
+  return `${year}-W${weekNum.toString().padStart(2, '0')}`;
+}
+
+function getISOWeek(date: Date): number {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+}
 
 export function Dashboard() {
   const navigate = useNavigate();
@@ -37,6 +57,10 @@ export function Dashboard() {
   const [showAddGoal, setShowAddGoal] = useState(false);
   const [newGoal, setNewGoal] = useState({ name: '', hours: '' });
   const [saving, setSaving] = useState(false);
+  const [weekOffset, setWeekOffset] = useState(0); // 0 = current week, -1 = previous, +1 = next
+  
+  // Client-side cache for week events
+  const weekCacheRef = useRef<Map<string, CalendarEvent[]>>(new Map());
 
   // Redirect to onboarding if not completed
   useEffect(() => {
@@ -46,20 +70,82 @@ export function Dashboard() {
     }
   }, [navigate, authLoading, isAuthenticated]);
 
-  // Fetch calendar events when authenticated
+  const getWeekDates = useCallback((offset: number = 0) => {
+    const now = new Date();
+    const dayOfWeek = now.getDay();
+    const monday = new Date(now);
+    monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1) + (offset * 7));
+    monday.setHours(0, 0, 0, 0);
+    
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    sunday.setHours(23, 59, 59, 999);
+    
+    return { monday, sunday };
+  }, []);
+
+  // Fetch events for a specific week offset (with caching)
+  const fetchWeekEvents = useCallback(async (offset: number, skipCache = false): Promise<CalendarEvent[]> => {
+    const cacheKey = getWeekCacheKey(offset);
+    
+    // Check cache first (unless explicitly skipping)
+    if (!skipCache && weekCacheRef.current.has(cacheKey)) {
+      return weekCacheRef.current.get(cacheKey)!;
+    }
+    
+    const { monday, sunday } = getWeekDates(offset);
+    const result = await calendar.getEvents(monday.toISOString(), sunday.toISOString());
+    
+    if (result.data?.events) {
+      // Store in cache
+      weekCacheRef.current.set(cacheKey, result.data.events);
+      return result.data.events;
+    }
+    
+    return [];
+  }, [getWeekDates]);
+
+  // Prefetch adjacent weeks in background
+  const prefetchAdjacentWeeks = useCallback(async (currentOffset: number) => {
+    // Prefetch previous and next week silently
+    const prefetchOffsets = [currentOffset - 1, currentOffset + 1];
+    
+    for (const offset of prefetchOffsets) {
+      const cacheKey = getWeekCacheKey(offset);
+      if (!weekCacheRef.current.has(cacheKey)) {
+        // Fetch in background without awaiting
+        fetchWeekEvents(offset).catch(() => {
+          // Silently ignore prefetch errors
+        });
+      }
+    }
+  }, [fetchWeekEvents]);
+
+  // Fetch calendar events when authenticated or week changes
   useEffect(() => {
     if (isAuthenticated) {
       fetchCalendarEvents();
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, weekOffset]);
 
-  const fetchCalendarEvents = async () => {
-    setEventsLoading(true);
-    const result = await calendar.getEvents();
-    if (result.data?.events) {
-      setCalendarEvents(result.data.events);
+  const fetchCalendarEvents = async (forceRefresh = false) => {
+    const cacheKey = getWeekCacheKey(weekOffset);
+    
+    // Use cache if available and not forcing refresh
+    if (!forceRefresh && weekCacheRef.current.has(cacheKey)) {
+      setCalendarEvents(weekCacheRef.current.get(cacheKey)!);
+      // Still prefetch adjacent weeks
+      prefetchAdjacentWeeks(weekOffset);
+      return;
     }
+    
+    setEventsLoading(true);
+    const events = await fetchWeekEvents(weekOffset, forceRefresh);
+    setCalendarEvents(events);
     setEventsLoading(false);
+    
+    // Prefetch adjacent weeks after loading current week
+    prefetchAdjacentWeeks(weekOffset);
   };
 
   const handleAddGoal = async () => {
@@ -99,7 +185,8 @@ export function Dashboard() {
   };
 
   const handleGenerate = async () => {
-    const success = await generate();
+    const { monday, sunday } = getWeekDates(weekOffset);
+    const success = await generate(monday.toISOString(), sunday.toISOString());
     if (success) {
       toast.success('Schedule generated! Review the proposed blocks below.');
     } else {
@@ -111,7 +198,9 @@ export function Dashboard() {
     const success = await apply();
     if (success) {
       toast.success('Focus blocks added to your calendar!');
-      fetchCalendarEvents();
+      // Clear cache for this week and force refresh
+      weekCacheRef.current.delete(getWeekCacheKey(weekOffset));
+      fetchCalendarEvents(true);
     } else {
       toast.error('Failed to apply schedule');
     }
@@ -142,19 +231,17 @@ export function Dashboard() {
     return DAYS_OF_WEEK[mondayIndex];
   };
 
-  // Get current week date range
+  // Get week date range based on offset
   const getWeekDateRange = () => {
-    const now = new Date();
-    const dayOfWeek = now.getDay();
-    const monday = new Date(now);
-    monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
-    
-    const sunday = new Date(monday);
-    sunday.setDate(monday.getDate() + 6);
+    const { monday, sunday } = getWeekDates(weekOffset);
     
     const options: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' };
-    return `${monday.toLocaleDateString('en-US', options)} - ${sunday.toLocaleDateString('en-US', options)}, ${now.getFullYear()}`;
+    return `${monday.toLocaleDateString('en-US', options)} - ${sunday.toLocaleDateString('en-US', options)}, ${monday.getFullYear()}`;
   };
+
+  const goToPreviousWeek = () => setWeekOffset(prev => prev - 1);
+  const goToNextWeek = () => setWeekOffset(prev => prev + 1);
+  const goToCurrentWeek = () => setWeekOffset(0);
 
   const totalGoalHours = goals.reduce((sum, g) => sum + g.targetMinutesPerWeek / 60, 0);
   const focusBlocks = calendarEvents.filter(e => e.isEliteBall);
@@ -441,12 +528,44 @@ export function Dashboard() {
         {/* Weekly Calendar View */}
         <Card>
           <CardHeader>
-            <CardTitle>Weekly Schedule</CardTitle>
-            <CardDescription>
-              {isAuthenticated 
-                ? 'Your calendar events and focus blocks'
-                : 'Sign in to see your real calendar events'}
-            </CardDescription>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>Weekly Schedule</CardTitle>
+                <CardDescription>
+                  {isAuthenticated 
+                    ? `${getWeekDateRange()} • ${calendarEvents.length} events`
+                    : 'Sign in to see your real calendar events'}
+                </CardDescription>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={goToPreviousWeek}
+                  disabled={eventsLoading}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                {weekOffset !== 0 && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={goToCurrentWeek}
+                    disabled={eventsLoading}
+                  >
+                    Today
+                  </Button>
+                )}
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={goToNextWeek}
+                  disabled={eventsLoading}
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
           </CardHeader>
           <CardContent>
             {eventsLoading ? (
@@ -460,11 +579,24 @@ export function Dashboard() {
                   {/* Days Header */}
                   <div className="mb-4 grid grid-cols-8 gap-2">
                     <div className="text-sm font-medium text-muted-foreground">Time</div>
-                    {DAYS_OF_WEEK.map((day) => (
-                      <div key={day} className="text-center text-sm font-medium">
-                        {day.slice(0, 3)}
-                      </div>
-                    ))}
+                    {DAYS_OF_WEEK.map((day, idx) => {
+                      const { monday } = getWeekDates(weekOffset);
+                      const dayDate = new Date(monday);
+                      dayDate.setDate(monday.getDate() + idx);
+                      const isToday = dayDate.toDateString() === new Date().toDateString();
+                      
+                      return (
+                        <div 
+                          key={day} 
+                          className={`text-center text-sm font-medium ${isToday ? 'text-purple-500' : ''}`}
+                        >
+                          <div>{day.slice(0, 3)}</div>
+                          <div className={`text-xs ${isToday ? 'bg-purple-500 text-white rounded-full w-6 h-6 flex items-center justify-center mx-auto' : 'text-muted-foreground'}`}>
+                            {dayDate.getDate()}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
 
                   {/* Time Slots */}
@@ -479,7 +611,7 @@ export function Dashboard() {
                             {hour > 12 ? hour - 12 : hour}:00 {hour >= 12 ? 'PM' : 'AM'}
                           </div>
                           {DAYS_OF_WEEK.map((day) => {
-                            // Find events for this day/time
+                            // Find calendar events for this day/time
                             const dayEvents = calendarEvents.filter((event) => {
                               const eventDay = getDayFromISO(event.start);
                               const eventStartMinutes = timeToMinutes(event.start);
@@ -493,8 +625,23 @@ export function Dashboard() {
                               );
                             });
 
+                            // Find proposed blocks for this day/time (preview before applying)
+                            const dayProposedBlocks = proposedBlocks.filter((block) => {
+                              const blockDay = getDayFromISO(block.start);
+                              const blockStartMinutes = timeToMinutes(block.start);
+                              const blockEndMinutes = timeToMinutes(block.end);
+                              const slotMinutes = hour * 60;
+                              
+                              return (
+                                blockDay === day &&
+                                blockStartMinutes <= slotMinutes &&
+                                blockEndMinutes > slotMinutes
+                              );
+                            });
+
                             return (
                               <div key={day} className="relative min-h-[60px]">
+                                {/* Existing calendar events */}
                                 {dayEvents.map((event) => (
                                   <div
                                     key={event.id}
@@ -511,7 +658,21 @@ export function Dashboard() {
                                   </div>
                                 ))}
 
-                                {dayEvents.length === 0 && (
+                                {/* Proposed blocks (pending - shown with striped pattern) */}
+                                {dayProposedBlocks.map((block, idx) => (
+                                  <div
+                                    key={`proposed-${idx}`}
+                                    className="absolute inset-x-0 rounded-md p-2 bg-green-500/30 border-2 border-dashed border-green-500 animate-pulse"
+                                  >
+                                    <p className="text-xs font-medium truncate">{block.goalName}</p>
+                                    <p className="text-xs opacity-75">
+                                      {formatTime(block.start)} - {formatTime(block.end)}
+                                    </p>
+                                    <span className="text-[10px] text-green-600 dark:text-green-400">Pending</span>
+                                  </div>
+                                ))}
+
+                                {dayEvents.length === 0 && dayProposedBlocks.length === 0 && (
                                   <div className="h-full rounded-md border border-dashed border-border bg-muted/10" />
                                 )}
                               </div>
@@ -535,6 +696,12 @@ export function Dashboard() {
                 <div className="h-3 w-3 rounded-md border-2 border-dashed border-muted-foreground" />
                 <span className="text-sm text-muted-foreground">Calendar Events</span>
               </div>
+              {hasProposedBlocks && (
+                <div className="flex items-center gap-2">
+                  <div className="h-3 w-3 rounded-md border-2 border-dashed border-green-500 bg-green-500/30" />
+                  <span className="text-sm text-muted-foreground">Pending (click Apply)</span>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>

@@ -18,10 +18,10 @@ export function useScheduler() {
     error: null,
   });
 
-  const generate = useCallback(async () => {
+  const generate = useCallback(async (weekStart?: string, weekEnd?: string) => {
     setState(prev => ({ ...prev, loading: true, error: null }));
     
-    const result = await scheduler.generate();
+    const result = await scheduler.generate(weekStart, weekEnd);
     
     if (result.error) {
       setState(prev => ({ 

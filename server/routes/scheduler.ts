@@ -7,7 +7,12 @@ const router = Router();
 // Generate proposed focus blocks
 router.post('/generate', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const result = await generateSchedule(req.userId!);
+    const { weekStart, weekEnd } = req.body;
+    
+    const startDate = weekStart ? new Date(weekStart) : undefined;
+    const endDate = weekEnd ? new Date(weekEnd) : undefined;
+    
+    const result = await generateSchedule(req.userId!, startDate, endDate);
     
     res.json({
       blocks: result.proposedBlocks,
